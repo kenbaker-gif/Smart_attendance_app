@@ -1,16 +1,126 @@
-# smart_attendance_app
+# 📱 Smart Attendance — Flutter Client (MVP)
 
-A new Flutter project.
+![Flutter](https://img.shields.io/badge/Mobile-Flutter-blue?style=for-the-badge&logo=flutter)
+![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS-lightgrey?style=for-the-badge&logo=android)
+![Status](https://img.shields.io/badge/Status-MVP-orange?style=for-the-badge)
 
-## Getting Started
+Lightweight Flutter client that captures, compresses, and uploads face images to a separate verification backend. This repository contains only the mobile application — the verification backend (FastAPI + InsightFace + Supabase) is maintained in a separate repository.
 
-This project is a starting point for a Flutter application.
+## Table of contents
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [How it works](#how-it-works)
+- [Development notes](#development-notes)
+- [Permissions](#permissions)
+- [Contributing](#contributing)
+- [License](#license)
 
-A few resources to get you started if this is your first Flutter project:
+---
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## 🚀 Quickstart
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Prerequisites
+- Flutter SDK (project targets Dart SDK ^3.10.7 — see `pubspec.yaml`)
+- Android SDK (or Xcode for iOS builds)
+
+Run locally
+
+```bash
+# fetch dependencies
+flutter pub get
+
+# run on a connected device (use --release for realistic performance)
+flutter run --release
+```
+
+This launches the app on the attached device or emulator. Note: the verification API is not included in this repo — the app posts images to an external verification service.
+
+---
+
+## ⚙️ Configuration
+
+The app posts face images to a verification backend. You must update the API endpoint in `lib/verification_screen.dart`:
+
+```dart
+var request = http.MultipartRequest(
+  'POST',
+  Uri.parse('https://your-backend-api.example.com/verify')
+);
+```
+
+Replace `https://your-backend-api.example.com/verify` with your actual backend URL. For production, consider storing this as a constant in `lib/config.dart` or using build-time `--dart-define` values.
+
+---
+
+## 🧠 How it works
+
+- Capture: the client uses the `camera` package to grab a single frame.
+- Compress: `flutter_image_compress` resizes the image (recommended ~600×600px) and lowers quality to target ~50–100 KB for faster uploads on mobile networks.
+- Upload: the compressed image is sent as a multipart/form-data POST to the verification backend.
+- Feedback: the server's JSON response (authorized / denied) is shown on-screen.
+
+Include the verification server's example request/response in the backend repo and link it here for full interoperability.
+
+---
+
+## 🛠️ Development notes
+
+- Timeouts: the app currently uses a 15s request timeout; adjust for your network conditions.
+- Camera preset: `ResolutionPreset.medium` balances speed and accuracy on low-end devices.
+- Latency testing: build with `--release` and test on real networks (3G/4G/Wi‑Fi) to measure true performance.
+- Configuration: prefer environment or build-time flags over hard-coded URLs.
+
+---
+
+## 🔒 Permissions
+
+On Android, ensure the app requests camera permission in `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.CAMERA" />
+```
+
+For iOS, add the camera usage description in `Info.plist`:
+
+```xml
+<key>NSCameraUsageDescription</key>
+<string>Camera access is required to capture face images for attendance verification.</string>
+```
+
+---
+
+## ⚠️ Known Issues
+
+**502 Bad Gateway on first capture after server sleep**
+
+If the verification server has been idle for ~10 minutes, it may enter sleep mode. When you capture the first face, you may receive a `502 Bad Gateway` error. This is expected — the server is waking up. Simply try the next verification and it should succeed.
+
+---
+
+## 🤝 Contributing
+
+- Open issues and pull requests are welcome.
+- Run `flutter format .` before committing.
+- Include a short video or screenshot for UI changes.
+
+Consider adding `CONTRIBUTING.md` for PR process and code style guidelines.
+
+---
+
+## 📄 License
+
+This project is open-source under the [MIT License](https://opensource.org/licenses/MIT). See [LICENSE](LICENSE) for the full text.
+
+---
+
+## 📧 Contact
+
+Questions, feedback, or contributions? Reach out at **ainebyonabubaker@proton.me**
+
+
+
+**Missing backend reference**
+The server-side code (FastAPI + InsightFace + Supabase) is in this repo: **https://github.com/kenbaker-gif/Smart_attendance_mvp**
+
+**Contributing**
+- Open issues and PRs are welcome. Please run `flutter format` and include a short description of platform/test steps for UI changes.
