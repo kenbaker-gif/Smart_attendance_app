@@ -1,15 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart'; // Import camera
+import 'package:camera/camera.dart'; 
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // ✅ Import dotenv
 import 'verification_screen.dart';
+import 'login_screen.dart'; 
 
-// Global variable to store the list of cameras
 List<CameraDescription> cameras = [];
 
 Future<void> main() async {
-  // 1. Ensure Flutter is ready
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 1. Load the Environment File 🔐
+  await dotenv.load(fileName: ".env");
+
+  // 2. Initialize Supabase using the secure keys
+  await Supabase.initialize(
+    url: dotenv.env['SUPABASE_URL']!,      // Read from .env
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!, // Read from .env
+  );
   
-  // 2. Find available cameras (Front/Back)
+  // 3. Find available cameras
   try {
     cameras = await availableCameras();
   } on CameraException catch (e) {
@@ -24,15 +34,20 @@ class AttendanceApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Check Login Status
+    final session = Supabase.instance.client.auth.currentSession;
+    final bool isLoggedIn = session != null;
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Smart Attendance',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
-        primaryColor: Colors.cyanAccent, // Changed to Cyan for more Sci-Fi look
+        primaryColor: Colors.cyanAccent, 
       ),
-      // Pass the cameras to the screen
-      home: VerificationScreen(cameras: cameras),
+      home: isLoggedIn 
+          ? VerificationScreen(cameras: cameras) 
+          : LoginScreen(cameras: cameras),
     );
   }
 }
