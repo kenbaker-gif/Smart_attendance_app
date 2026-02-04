@@ -6,9 +6,17 @@
 
 Lightweight Flutter client that captures, compresses, and uploads face images to a separate verification backend. This repository contains only the mobile application — the verification backend (FastAPI + InsightFace + Supabase) is maintained in a separate repository.
 
+**New Features (Latest Update):**
+- 🔐 **Supabase Authentication** — Email/password login with session management
+- 👆 **Biometric Login** — Fingerprint authentication support
+- ⏱️ **Auto-Lock Security** — 2-minute inactivity timeout with soft-lock functionality
+- 🔑 **Secure Credentials** — Environment variables via `.env` file
+
 ## Table of contents
 - [Quickstart](#quickstart)
 - [Configuration](#configuration)
+- [Authentication](#authentication)
+- [Security Features](#security-features)
 - [How it works](#how-it-works)
 - [Development notes](#development-notes)
 - [Permissions](#permissions)
@@ -39,7 +47,20 @@ This launches the app on the attached device or emulator. Note: the verification
 
 ## ⚙️ Configuration
 
-The app posts face images to a verification backend. You must update the API endpoint in `lib/verification_screen.dart`:
+### Supabase Setup
+
+Create a `.env` file in the project root with your Supabase credentials:
+
+```env
+SUPABASE_URL=https://your-supabase-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key_here
+```
+
+Get these values from your Supabase project settings.
+
+### API Endpoint
+
+The app posts face images to a verification backend. Update the API endpoint in `lib/verification_screen.dart`:
 
 ```dart
 var request = http.MultipartRequest(
@@ -48,7 +69,49 @@ var request = http.MultipartRequest(
 );
 ```
 
-Replace `https://your-backend-api.example.com/verify` with your actual backend URL. For production, consider storing this as a constant in `lib/config.dart` or using build-time `--dart-define` values.
+Replace `https://your-backend-api.example.com/verify` with your actual backend URL.
+
+---
+
+## 🔐 Authentication
+
+### Login Flow
+
+1. **First Login**: User enters email and password
+2. **Session Created**: Supabase authentication creates a session token
+3. **Access Granted**: User is taken to the verification screen
+
+### Biometric Unlock
+
+If the device supports fingerprint/biometric authentication:
+
+- A fingerprint button appears on the login screen
+- Tap to authenticate with your device's biometric sensor
+- **Note**: Biometric unlock only works if a valid session already exists (user must log in with password first)
+
+### Session Management
+
+- Sessions remain valid for authentication after the app is closed
+- The login screen will show "Welcome Back" if a valid session exists
+- On fingerprint unlock, the session is preserved
+
+---
+
+## ⏱️ Security Features
+
+### Auto-Lock (Soft Lock)
+
+- **Trigger**: 2-minute inactivity timeout or app backgrounding for >2 minutes
+- **Behavior**: User is returned to login screen, but session remains valid
+- **Unlock**: Fingerprint authentication (if available) or password re-entry
+- **Purpose**: Prevents unauthorized access without losing the session
+
+### Manual Logout (Hard Logout)
+
+- **Trigger**: Clicking the red logout button (⬅️ icon, top-left)
+- **Behavior**: Completely destroys the Supabase session
+- **Effect**: User must log in again with email/password
+- **Purpose**: Secure logout for shared or public devices
 
 ---
 
@@ -74,17 +137,22 @@ Include the verification server's example request/response in the backend repo a
 
 ## 🔒 Permissions
 
-On Android, ensure the app requests camera permission in `android/app/src/main/AndroidManifest.xml`:
+On Android, the app requests the following permissions in `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
 <uses-permission android:name="android.permission.CAMERA" />
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.USE_BIOMETRIC" />
 ```
 
-For iOS, add the camera usage description in `Info.plist`:
+For iOS, add the following descriptions in `Info.plist`:
 
 ```xml
 <key>NSCameraUsageDescription</key>
 <string>Camera access is required to capture face images for attendance verification.</string>
+
+<key>NSFaceIDUsageDescription</key>
+<string>Face ID is used for secure biometric authentication.</string>
 ```
 
 ---
