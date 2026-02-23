@@ -1,32 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart'; 
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // ✅ Import dotenv
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:wakelock_plus/wakelock_plus.dart'; 
 import 'verification_screen.dart';
 import 'login_screen.dart'; 
+import 'admin_screen.dart';
+import 'stats_screen.dart';           
+import 'security_wrapper.dart';       
 
 List<CameraDescription> cameras = [];
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Load the Environment File 🔐
+  // 1. Keep screen on for S23 Ultra
+  // We wrap this in a try-catch just in case the native side isn't ready
+  try {
+    WakelockPlus.enable();
+  } catch (e) {
+    debugPrint("Wakelock error: $e");
+  }
+
+  // 2. Load the Environment File 🔐
   await dotenv.load(fileName: ".env");
 
-  // 2. Initialize Supabase using the secure keys
+  // 3. Initialize Supabase
   await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,      // Read from .env
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!, // Read from .env
+    url: dotenv.env['SUPABASE_URL']!,
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
   
-  // 3. Find available cameras
+  // 4. Find available cameras
   try {
     cameras = await availableCameras();
   } on CameraException catch (e) {
-    print('Error in fetching the cameras: $e');
+    debugPrint('Error in fetching the cameras: $e');
   }
 
-  runApp(const AttendanceApp());
+  // 5. Wrap the App in the Security Guard
+  runApp(
+    SecurityWrapper(
+      child: const AttendanceApp(),
+    ),
+  );
 }
 
 class AttendanceApp extends StatelessWidget {
@@ -34,7 +51,6 @@ class AttendanceApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Check Login Status
     final session = Supabase.instance.client.auth.currentSession;
     final bool isLoggedIn = session != null;
 
@@ -45,9 +61,14 @@ class AttendanceApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black,
         primaryColor: Colors.cyanAccent, 
       ),
-      home: isLoggedIn 
-          ? VerificationScreen(cameras: cameras) 
-          : LoginScreen(cameras: cameras),
+      // Set the starting point
+      initialRoute: isLoggedIn ? '/home' : '/login',
+      routes: {
+        '/login': (context) => LoginScreen(cameras: cameras),
+        '/home': (context) => VerificationScreen(cameras: cameras),
+        '/admin': (context) => AdminScreen(cameras: cameras), // ✅ Fixed: Passed cameras
+        '/stats': (context) => const StatsScreen(),
+      },
     );
   }
 }

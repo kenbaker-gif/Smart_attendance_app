@@ -10,95 +10,35 @@ import 'login_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-
   const VerificationScreen({super.key, required this.cameras});
 
   @override
   State<VerificationScreen> createState() => _VerificationScreenState();
 }
 
-class _VerificationScreenState extends State<VerificationScreen> with WidgetsBindingObserver {
+class _VerificationScreenState extends State<VerificationScreen> {
   CameraController? _controller;
   bool _isCameraInitialized = false;
   bool _isScanning = false;
   bool _showFlash = false;
-  
+  bool _serverWakingUp = false; // To track if the server is taking long
   int _selectedCameraIndex = 0; 
   Map<String, dynamic>? _result;
-
-  // ⏱️ SECURITY VARIABLES
-  Timer? _inactivityTimer;
-  static const int _timeoutSeconds = 120; // 2 Minutes
-  DateTime? _pausedTime; 
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _startInactivityTimer();
-    _selectedCameraIndex = 0;
     _initCamera(_selectedCameraIndex);
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      _pausedTime = DateTime.now();
-      _inactivityTimer?.cancel();
-    } else if (state == AppLifecycleState.resumed) {
-      if (_pausedTime != null) {
-        final timeInBackground = DateTime.now().difference(_pausedTime!);
-        
-        if (timeInBackground.inSeconds >= _timeoutSeconds) {
-          print("Background timeout. Locking...");
-          _logout(); // Triggers the Soft Lock
-        } else {
-          _startInactivityTimer();
-        }
-      }
-    }
-  }
-
-  // 🔒 "SOFT LOCK" LOGIC
-  Future<void> _logout() async {
-    _inactivityTimer?.cancel();
-    
-    // ⚠️ CRITICAL CHANGE: We DO NOT sign out here.
-    // We keep the session alive so Fingerprint/FaceID works on the Login Screen.
-    // await Supabase.instance.client.auth.signOut(); <--- REMOVED
-    
-    if (!mounted) return;
-    
-    // Return to Login Screen (Session remains valid for Biometric Unlock)
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
-      (route) => false,
-    );
-  }
-
-  // 🔴 "HARD LOGOUT" (For the button)
-  // If the user manually clicks the Logout button, we WANT to kill the session.
+  // 🔴 HARD LOGOUT (Manual Button)
   Future<void> _manualLogout() async {
-    _inactivityTimer?.cancel();
-    await Supabase.instance.client.auth.signOut(); // Kill session
+    await Supabase.instance.client.auth.signOut();
     if (!mounted) return;
-
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
       (route) => false,
     );
-  }
-
-  void _startInactivityTimer() {
-    _inactivityTimer?.cancel();
-    _inactivityTimer = Timer(const Duration(seconds: _timeoutSeconds), () {
-      print("Screen idle timeout. Locking...");
-      _logout();
-    });
-  }
-
-  void _userInteracted() {
-    _startInactivityTimer();
   }
 
   Future<void> _initCamera(int cameraIndex) async {
@@ -113,9 +53,6 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
 
     try {
       await _controller!.initialize();
-      if (_controller!.description.lensDirection == CameraLensDirection.back) {
-         await _controller!.setFlashMode(FlashMode.off);
-      }
       if (!mounted) return;
       setState(() => _isCameraInitialized = true);
     } catch (e) {
@@ -125,7 +62,6 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
 
   void _toggleCamera() {
     if (widget.cameras.length < 2) return; 
-    _userInteracted();
     setState(() {
       _isCameraInitialized = false; 
       _selectedCameraIndex = (_selectedCameraIndex + 1) % widget.cameras.length;
@@ -147,17 +83,25 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
   }
 
   Future<void> _scanFace() async {
-    _userInteracted();
     if (!_isCameraInitialized || _isScanning) return;
 
     setState(() {
       _isScanning = true;
       _result = null;
       _showFlash = true;
+      _serverWakingUp = false; 
     });
 
+    // Flash effect logic
     Future.delayed(const Duration(milliseconds: 50), () {
       if (mounted) setState(() => _showFlash = false);
+    });
+
+    // ⏱️ MONITOR SERVER WAKE-UP
+    Timer? wakeUpTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _isScanning) {
+        setState(() => _serverWakingUp = true);
+      }
     });
 
     try {
@@ -171,12 +115,12 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
       );
       request.files.add(await http.MultipartFile.fromPath('file', fileToSend.path));
 
-      var streamedResponse = await request.send().timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => throw Exception("Connection too slow."),
+      // 🛰️ SERVER CALL
+      var response = await http.Response.fromStream(
+        await request.send().timeout(const Duration(seconds: 25))
       );
 
-      var response = await http.Response.fromStream(streamedResponse);
+      wakeUpTimer.cancel(); // Response received!
 
       if (response.statusCode == 200) {
         var json = jsonDecode(response.body);
@@ -185,13 +129,15 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
         _showError("Server Error (${response.statusCode})");
       }
     } catch (e) {
-      _showError("Error: $e");
+      wakeUpTimer.cancel();
+      _showError("Connection failed. Check your internet.");
     } finally {
       if (mounted) {
-        if (_controller != null && _controller!.value.isInitialized) {
-          await _controller!.resumePreview();
-        }
-        setState(() => _isScanning = false);
+        if (_controller != null) await _controller!.resumePreview();
+        setState(() {
+          _isScanning = false;
+          _serverWakingUp = false;
+        });
       }
     }
   }
@@ -199,14 +145,12 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+      SnackBar(content: Text(message), backgroundColor: Colors.redAccent)
     );
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); 
-    _inactivityTimer?.cancel();
     _controller?.dispose();
     super.dispose();
   }
@@ -214,104 +158,120 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
   @override
   Widget build(BuildContext context) {
     if (!_isCameraInitialized) {
-      return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent)));
+      return const Scaffold(
+        backgroundColor: Colors.black, 
+        body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+      );
     }
 
     bool isMatch = false;
     String identity = "Unknown";
-
     if (_result != null) {
       if (_result!['match'] == true || _result!['status'] == 'success') isMatch = true;
       if (_result!['name'] != null) identity = _result!['name'].toString();
     }
 
-    return Listener(
-      onPointerDown: (_) => _userInteracted(), 
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            Center(child: CameraPreview(_controller!)),
-            CustomPaint(size: Size.infinite, painter: ScannerOverlayPainter()),
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // 1. CAMERA FEED
+          Center(child: CameraPreview(_controller!)),
+          
+          // 2. SCANNER OVERLAY
+          CustomPaint(size: Size.infinite, painter: ScannerOverlayPainter()),
 
-            // 🔴 MANUAL LOGOUT BUTTON (Kills session)
-            Positioned(
-              top: 50, left: 20,
-              child: FloatingActionButton.small(
-                heroTag: "logout_btn",
-                backgroundColor: Colors.red.withOpacity(0.8),
-                onPressed: _manualLogout, // Use Manual Logout here!
-                child: const Icon(Icons.logout, color: Colors.white),
-              ),
+          // 3. TOP ACTION BAR
+          Positioned(
+            top: 50, left: 20, right: 20,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: "btn_logout",
+                  backgroundColor: Colors.red.withOpacity(0.8),
+                  onPressed: _manualLogout,
+                  child: const Icon(Icons.logout, color: Colors.white),
+                ),
+                if (widget.cameras.length > 1)
+                  GestureDetector(
+                    onTap: _toggleCamera,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                      child: const Icon(Icons.cameraswitch_rounded, color: Colors.cyanAccent, size: 30),
+                    ),
+                  ),
+              ],
             ),
+          ),
 
-            // 📷 SWITCH CAMERA
-            if (widget.cameras.length > 1)
-              Positioned(
-                top: 50, right: 20,
-                child: GestureDetector(
-                  onTap: _toggleCamera,
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle, border: Border.all(color: Colors.cyanAccent, width: 2)),
-                    child: const Icon(Icons.cameraswitch_rounded, color: Colors.cyanAccent, size: 30),
+          // 4. RESULTS DISPLAY
+          if (_result != null)
+            Positioned(
+              top: 120, left: 20, right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  border: Border.all(color: isMatch ? Colors.greenAccent : Colors.redAccent, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  isMatch ? "MATCH: $identity" : "NO MATCH FOUND",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: isMatch ? Colors.greenAccent : Colors.redAccent, 
+                    fontSize: 18, 
+                    fontWeight: FontWeight.bold
                   ),
                 ),
               ),
-
-            // 📝 RESULT
-            Positioned(
-              top: 120, left: 20, right: 20,
-              child: Column(
-                children: [
-                  if (_result != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        border: Border.all(color: isMatch ? Colors.greenAccent : Colors.redAccent, width: 2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        isMatch ? "AUTHORIZED: $identity" : "ACCESS DENIED",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: isMatch ? Colors.greenAccent : Colors.redAccent, fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                ],
-              ),
             ),
 
-            // 🔘 SCAN BUTTON
-            Positioned(
-              bottom: 50, left: 0, right: 0,
-              child: Column(
-                children: [
-                  Text(_isScanning ? "ANALYZING..." : "AUTO-LOCK ENABLED (2M)", style: const TextStyle(color: Colors.cyanAccent, fontSize: 14, letterSpacing: 2.0)),
-                  const SizedBox(height: 20),
-                  GestureDetector(
-                    onTap: _scanFace,
-                    child: Container(
-                      height: 80, width: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.cyanAccent, width: 3),
-                        boxShadow: [BoxShadow(color: Colors.cyanAccent.withOpacity(0.3), blurRadius: 15)],
-                      ),
-                      child: Center(
-                        child: _isScanning
-                            ? const CircularProgressIndicator(color: Colors.cyanAccent)
-                            : const Icon(Icons.fingerprint, color: Colors.cyanAccent, size: 45),
-                      ),
+          // 5. BOTTOM UI (BUTTON & STATUS)
+          Positioned(
+            bottom: 60, left: 0, right: 0,
+            child: Column(
+              children: [
+                if (_serverWakingUp)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 15),
+                    child: Text(
+                      "☕ Server is waking up... please wait",
+                      style: TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.bold),
                     ),
                   ),
-                ],
-              ),
+                Text(
+                  _isScanning ? "ANALYZING BIOMETRICS..." : "READY TO SCAN", 
+                  style: const TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 2)
+                ),
+                const SizedBox(height: 20),
+                GestureDetector(
+                  onTap: _scanFace,
+                  child: Container(
+                    height: 85, width: 85,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.cyanAccent, width: 3),
+                      boxShadow: [
+                        if (_isScanning)
+                          BoxShadow(color: Colors.cyanAccent.withOpacity(0.4), blurRadius: 20)
+                      ],
+                    ),
+                    child: Center(
+                      child: _isScanning 
+                        ? const CircularProgressIndicator(color: Colors.cyanAccent)
+                        : const Icon(Icons.camera_alt_outlined, color: Colors.cyanAccent, size: 40),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            
-            if (_showFlash) Container(color: Colors.white.withOpacity(0.6)),
-          ],
-        ),
+          ),
+          
+          if (_showFlash) Container(color: Colors.white.withOpacity(0.5)),
+        ],
       ),
     );
   }
@@ -320,12 +280,17 @@ class _VerificationScreenState extends State<VerificationScreen> with WidgetsBin
 class ScannerOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.cyanAccent..style = PaintingStyle.stroke..strokeWidth = 3.0;
+    final paint = Paint()
+      ..color = Colors.cyanAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+    
     double boxSize = size.width * 0.75;
     double left = (size.width - boxSize) / 2;
     double top = (size.height - boxSize) / 2.5;
     double len = 30.0;
 
+    // Corner brackets
     canvas.drawLine(Offset(left, top), Offset(left + len, top), paint);
     canvas.drawLine(Offset(left, top), Offset(left, top + len), paint);
     canvas.drawLine(Offset(left + boxSize, top), Offset(left + boxSize - len, top), paint);
