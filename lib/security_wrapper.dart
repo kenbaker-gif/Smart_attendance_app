@@ -14,9 +14,10 @@ class SecurityWrapper extends StatefulWidget {
 class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingObserver {
   final LocalAuthentication _auth = LocalAuthentication();
   Timer? _inactivityTimer;
+  
   bool _isLocked = false;
+  bool _isAppPaused = false;
   bool _isCheckingSecurity = true;
-  bool _isAuthenticating = false;
 
   static const Duration _timeoutLimit = Duration(minutes: 2);
   static const String _storageKey = 'last_interaction_time';
@@ -31,7 +32,7 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
   Future<void> _initializeSecurity() async {
     final prefs = await SharedPreferences.getInstance();
     final lastActiveStr = prefs.getString(_storageKey);
-
+    
     bool shouldLock = false;
     if (lastActiveStr != null) {
       final lastActive = DateTime.tryParse(lastActiveStr);
@@ -46,24 +47,17 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
         _isCheckingSecurity = false;
       });
       if (shouldLock) _authenticate();
-      _startInactivityTimer();
     }
+    _resetTimer();
   }
 
-  void _startInactivityTimer() {
-    _inactivityTimer?.cancel();
-    _inactivityTimer = Timer(_timeoutLimit, () {
-      if (mounted && !_isLocked) {
-        setState(() => _isLocked = true);
-        _authenticate();
-      }
-    });
-  }
-
-  void _resetInactivityTimer() {
+  void _resetTimer() {
     if (_isLocked) return;
     _recordInteraction();
-    _startInactivityTimer();
+    _inactivityTimer?.cancel();
+    _inactivityTimer = Timer(_timeoutLimit, () {
+      if (mounted) setState(() => _isLocked = true);
+    });
   }
 
   Future<void> _recordInteraction() async {
@@ -72,34 +66,28 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
   }
 
   Future<void> _authenticate() async {
-    if (_isAuthenticating) return;
-    _isAuthenticating = true;
-
     try {
-      final authenticated = await _auth.authenticate(
+      bool authenticated = await _auth.authenticate(
         localizedReason: 'Scan fingerprint to unlock',
         options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
 
       if (authenticated && mounted) {
         setState(() => _isLocked = false);
-        _recordInteraction();
-        _startInactivityTimer();
+        _resetTimer();
       }
     } catch (e) {
       debugPrint("Auth error: $e");
-    } finally {
-      _isAuthenticating = false;
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    setState(() => _isAppPaused = (state != AppLifecycleState.resumed));
     if (state == AppLifecycleState.resumed) {
       _initializeSecurity();
-    } else if (state == AppLifecycleState.paused) {
+    } else {
       _recordInteraction();
-      _inactivityTimer?.cancel();
     }
   }
 
@@ -112,21 +100,22 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
 
   @override
   Widget build(BuildContext context) {
-    // If checking, show the app but don't show the lock yet
-    if (_isCheckingSecurity) return widget.child;
+    if (_isCheckingSecurity) return const Scaffold(backgroundColor: Colors.black);
 
     return Listener(
       behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) => _resetInactivityTimer(),
+      onPointerDown: (_) => _resetTimer(),
       child: Stack(
         children: [
-          // 🔹 THIS IS YOUR APP (Stats, Admin, etc.)
-          // It stays exactly where it was.
+          // THE ACTUAL SCREEN (Admin, Stats, etc.)
           widget.child,
 
-          // 🔹 THIS IS THE OVERLAY
-          if (_isLocked)
-            Material( // Using Material here ensures the lock screen renders correctly
+          // PRIVACY SCREEN (When in background)
+          if (_isAppPaused) Container(color: Colors.black),
+
+          // LOCK SCREEN
+          if (_isLocked && !_isAppPaused)
+            Material(
               color: Colors.black.withOpacity(0.98),
               child: Center(
                 child: Column(
@@ -134,13 +123,12 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
                   children: [
                     const Icon(Icons.fingerprint, size: 80, color: Colors.cyanAccent),
                     const SizedBox(height: 24),
-                    const Text("SECURITY LOCK ACTIVE", 
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                    const Text("LOCKED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 2)),
                     const SizedBox(height: 48),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
                       onPressed: _authenticate,
-                      child: const Text("UNLOCK", style: TextStyle(color: Colors.black)),
+                      child: const Text("UNLOCK NOW"),
                     ),
                   ],
                 ),

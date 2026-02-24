@@ -35,7 +35,7 @@ Future<void> main() async {
     debugPrint('Error in fetching the cameras: $e');
   }
 
-  // 4. Run the app (One main to rule them all)
+  // 4. Run the app
   runApp(const AttendanceApp());
 }
 
@@ -54,9 +54,12 @@ class AttendanceApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black,
         primaryColor: Colors.cyanAccent, 
       ),
-      // 🟢 THIS IS THE FIX: It puts the security guard AROUND the navigator
+      // 🟢 THE RECOMMENDED WRAP: 
+      // ScaffoldMessenger allows Snackbars to work over the security layer.
       builder: (context, child) {
-        return SecurityWrapper(child: child!);
+        return ScaffoldMessenger(
+          child: SecurityWrapper(child: child!),
+        );
       },
       initialRoute: isLoggedIn ? '/home' : '/login',
       routes: {
