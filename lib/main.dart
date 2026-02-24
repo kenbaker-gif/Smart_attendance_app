@@ -15,35 +15,28 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 1. Keep screen on for S23 Ultra
-  // We wrap this in a try-catch just in case the native side isn't ready
   try {
     WakelockPlus.enable();
   } catch (e) {
     debugPrint("Wakelock error: $e");
   }
 
-  // 2. Load the Environment File 🔐
+  // 2. Load Environment & Supabase
   await dotenv.load(fileName: ".env");
-
-  // 3. Initialize Supabase
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
   
-  // 4. Find available cameras
+  // 3. Find available cameras
   try {
     cameras = await availableCameras();
   } on CameraException catch (e) {
     debugPrint('Error in fetching the cameras: $e');
   }
 
-  // 5. Wrap the App in the Security Guard
-  runApp(
-    SecurityWrapper(
-      child: const AttendanceApp(),
-    ),
-  );
+  // 4. Run the app (One main to rule them all)
+  runApp(const AttendanceApp());
 }
 
 class AttendanceApp extends StatelessWidget {
@@ -61,12 +54,15 @@ class AttendanceApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black,
         primaryColor: Colors.cyanAccent, 
       ),
-      // Set the starting point
+      // 🟢 THIS IS THE FIX: It puts the security guard AROUND the navigator
+      builder: (context, child) {
+        return SecurityWrapper(child: child!);
+      },
       initialRoute: isLoggedIn ? '/home' : '/login',
       routes: {
         '/login': (context) => LoginScreen(cameras: cameras),
         '/home': (context) => VerificationScreen(cameras: cameras),
-        '/admin': (context) => AdminScreen(cameras: cameras), // ✅ Fixed: Passed cameras
+        '/admin': (context) => AdminScreen(cameras: cameras),
         '/stats': (context) => const StatsScreen(),
       },
     );

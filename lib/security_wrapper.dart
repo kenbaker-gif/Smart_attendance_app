@@ -14,12 +14,10 @@ class SecurityWrapper extends StatefulWidget {
 class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingObserver {
   final LocalAuthentication _auth = LocalAuthentication();
   Timer? _inactivityTimer;
-  
   bool _isLocked = false;
-  bool _isAppPaused = false;
   bool _isCheckingSecurity = true;
+  bool _isAuthenticating = false;
 
-  // Configuration
   static const Duration _timeoutLimit = Duration(minutes: 2);
   static const String _storageKey = 'last_interaction_time';
 
@@ -30,16 +28,14 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
     _initializeSecurity();
   }
 
-  /// 1. The "Logic" - Checking if we should be locked
   Future<void> _initializeSecurity() async {
     final prefs = await SharedPreferences.getInstance();
     final lastActiveStr = prefs.getString(_storageKey);
-    
+
     bool shouldLock = false;
     if (lastActiveStr != null) {
-      final lastActive = DateTime.parse(lastActiveStr);
-      final elapsed = DateTime.now().difference(lastActive);
-      if (elapsed >= _timeoutLimit) {
+      final lastActive = DateTime.tryParse(lastActiveStr);
+      if (lastActive != null && DateTime.now().difference(lastActive) >= _timeoutLimit) {
         shouldLock = true;
       }
     }
@@ -49,54 +45,61 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
         _isLocked = shouldLock;
         _isCheckingSecurity = false;
       });
-      
-      if (shouldLock) _authenticate(); // Auto-prompt fingerprint
+      if (shouldLock) _authenticate();
+      _startInactivityTimer();
     }
-    _resetTimer();
   }
 
-  /// 2. The "Timer" - Recording activity
-  Future<void> _resetTimer() async {
-    // Record to disk for "App Closed" scenarios
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_storageKey, DateTime.now().toIso8601String());
-
-    // Internal timer for "Screen On" scenarios
+  void _startInactivityTimer() {
     _inactivityTimer?.cancel();
     _inactivityTimer = Timer(_timeoutLimit, () {
-      if (mounted) setState(() => _isLocked = true);
+      if (mounted && !_isLocked) {
+        setState(() => _isLocked = true);
+        _authenticate();
+      }
     });
   }
 
-  /// 3. The "Biometrics" - Unlocking
+  void _resetInactivityTimer() {
+    if (_isLocked) return;
+    _recordInteraction();
+    _startInactivityTimer();
+  }
+
+  Future<void> _recordInteraction() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_storageKey, DateTime.now().toIso8601String());
+  }
+
   Future<void> _authenticate() async {
+    if (_isAuthenticating) return;
+    _isAuthenticating = true;
+
     try {
-      bool authenticated = await _auth.authenticate(
-        localizedReason: 'Scan fingerprint to continue',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: true,
-        ),
+      final authenticated = await _auth.authenticate(
+        localizedReason: 'Scan fingerprint to unlock',
+        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
 
       if (authenticated && mounted) {
         setState(() => _isLocked = false);
-        _resetTimer();
+        _recordInteraction();
+        _startInactivityTimer();
       }
     } catch (e) {
       debugPrint("Auth error: $e");
+    } finally {
+      _isAuthenticating = false;
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    setState(() => _isAppPaused = (state != AppLifecycleState.resumed));
-
     if (state == AppLifecycleState.resumed) {
       _initializeSecurity();
-    } else {
-      // Save time immediately when app is minimized
-      _resetTimer();
+    } else if (state == AppLifecycleState.paused) {
+      _recordInteraction();
+      _inactivityTimer?.cancel();
     }
   }
 
@@ -109,21 +112,21 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
 
   @override
   Widget build(BuildContext context) {
-    if (_isCheckingSecurity) return const Scaffold(backgroundColor: Colors.black);
+    // If checking, show the app but don't show the lock yet
+    if (_isCheckingSecurity) return widget.child;
 
     return Listener(
       behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) => _resetTimer(),
+      onPointerDown: (_) => _resetInactivityTimer(),
       child: Stack(
         children: [
+          // 🔹 THIS IS YOUR APP (Stats, Admin, etc.)
+          // It stays exactly where it was.
           widget.child,
-          
-          // Privacy Overlay (Switcher view)
-          if (_isAppPaused) Container(color: Colors.black),
 
-          // Lock Overlay
-          if (_isLocked && !_isAppPaused)
-            Container(
+          // 🔹 THIS IS THE OVERLAY
+          if (_isLocked)
+            Material( // Using Material here ensures the lock screen renders correctly
               color: Colors.black.withOpacity(0.98),
               child: Center(
                 child: Column(
@@ -132,17 +135,12 @@ class _SecurityWrapperState extends State<SecurityWrapper> with WidgetsBindingOb
                     const Icon(Icons.fingerprint, size: 80, color: Colors.cyanAccent),
                     const SizedBox(height: 24),
                     const Text("SECURITY LOCK ACTIVE", 
-                      style: TextStyle(color: Colors.white, letterSpacing: 2, fontWeight: FontWeight.bold, decoration: TextDecoration.none, fontSize: 14)),
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 2)),
                     const SizedBox(height: 48),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.cyanAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      ),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
                       onPressed: _authenticate,
-                      child: const Text("UNLOCK NOW", style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: const Text("UNLOCK", style: TextStyle(color: Colors.black)),
                     ),
                   ],
                 ),

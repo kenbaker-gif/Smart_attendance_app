@@ -1,7 +1,7 @@
 name: smart_attendance_app
 description: "A new Flutter project."
 publish_to: 'none'
-version: 1.0.0+5
+version: 1.0.0+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -11,13 +11,16 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
 
-  #Biometric option
+  # Biometric option
   local_auth: ^2.3.0
 
-  # ✅ AUTHENTICATION (New!)
+  # Authentication
   supabase_flutter: ^2.8.0 
 
-  # ✅ CORE PACKAGES
+  # Storage (REQUIRED for security wrapper)
+  shared_preferences: ^2.2.2
+
+  # Core packages
   camera: ^0.10.5
   http: ^1.2.1
   path_provider: ^2.1.5
@@ -36,7 +39,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # ✅ ADD THIS SECTION
   assets:
     - .env
     - shorebird.yaml
