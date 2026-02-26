@@ -21,17 +21,37 @@ class _VerificationScreenState extends State<VerificationScreen> {
   bool _isCameraInitialized = false;
   bool _isScanning = false;
   bool _showFlash = false;
-  bool _serverWakingUp = false; // To track if the server is taking long
-  int _selectedCameraIndex = 0; 
+  bool _serverWakingUp = false;
+  int _selectedCameraIndex = 0;
   Map<String, dynamic>? _result;
+
+  // ✅ Admin state
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     _initCamera(_selectedCameraIndex);
+    _fetchAdminStatus(); // ✅ Check admin role on load
   }
 
-  // 🔴 HARD LOGOUT (Manual Button)
+  // ✅ Fetch admin status once when screen loads
+  Future<void> _fetchAdminStatus() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final data = await Supabase.instance.client
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    if (mounted) {
+      setState(() => _isAdmin = data != null && data['is_admin'] == true);
+    }
+  }
+
+  // 🔴 HARD LOGOUT
   Future<void> _manualLogout() async {
     await Supabase.instance.client.auth.signOut();
     if (!mounted) return;
@@ -47,7 +67,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
     _controller = CameraController(
       widget.cameras[cameraIndex],
-      ResolutionPreset.medium, 
+      ResolutionPreset.medium,
       enableAudio: false,
     );
 
@@ -61,9 +81,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
   }
 
   void _toggleCamera() {
-    if (widget.cameras.length < 2) return; 
+    if (widget.cameras.length < 2) return;
     setState(() {
-      _isCameraInitialized = false; 
+      _isCameraInitialized = false;
       _selectedCameraIndex = (_selectedCameraIndex + 1) % widget.cameras.length;
     });
     _initCamera(_selectedCameraIndex);
@@ -74,7 +94,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
     final lastIndex = filePath.lastIndexOf(RegExp(r'.jp'));
     final splitted = filePath.substring(0, (lastIndex));
     final outPath = "${splitted}_out.jpg";
-    
+
     var result = await FlutterImageCompress.compressAndGetFile(
       file.absolute.path, outPath,
       quality: 60, minWidth: 600, minHeight: 600,
@@ -89,19 +109,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
       _isScanning = true;
       _result = null;
       _showFlash = true;
-      _serverWakingUp = false; 
+      _serverWakingUp = false;
     });
 
-    // Flash effect logic
     Future.delayed(const Duration(milliseconds: 50), () {
       if (mounted) setState(() => _showFlash = false);
     });
 
-    // ⏱️ MONITOR SERVER WAKE-UP
     Timer? wakeUpTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _isScanning) {
-        setState(() => _serverWakingUp = true);
-      }
+      if (mounted && _isScanning) setState(() => _serverWakingUp = true);
     });
 
     try {
@@ -111,16 +127,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('https://smartattendancemvp-production.up.railway.app/verify')
+        Uri.parse('https://smartattendancemvp-production.up.railway.app/verify'),
       );
       request.files.add(await http.MultipartFile.fromPath('file', fileToSend.path));
 
-      // 🛰️ SERVER CALL
       var response = await http.Response.fromStream(
-        await request.send().timeout(const Duration(seconds: 25))
+        await request.send().timeout(const Duration(seconds: 25)),
       );
 
-      wakeUpTimer.cancel(); // Response received!
+      wakeUpTimer.cancel();
 
       if (response.statusCode == 200) {
         var json = jsonDecode(response.body);
@@ -145,7 +160,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.redAccent)
+      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
     );
   }
 
@@ -159,8 +174,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Widget build(BuildContext context) {
     if (!_isCameraInitialized) {
       return const Scaffold(
-        backgroundColor: Colors.black, 
-        body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent)),
       );
     }
 
@@ -177,7 +192,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
         children: [
           // 1. CAMERA FEED
           Center(child: CameraPreview(_controller!)),
-          
+
           // 2. SCANNER OVERLAY
           CustomPaint(size: Size.infinite, painter: ScannerOverlayPainter()),
 
@@ -187,19 +202,48 @@ class _VerificationScreenState extends State<VerificationScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                // Logout button (always visible)
                 FloatingActionButton.small(
                   heroTag: "btn_logout",
                   backgroundColor: Colors.red.withOpacity(0.8),
                   onPressed: _manualLogout,
                   child: const Icon(Icons.logout, color: Colors.white),
                 ),
+
+                // ✅ Admin buttons — only shown if user is admin
+                if (_isAdmin)
+                  Row(
+                    children: [
+                      // Admin Screen button
+                      FloatingActionButton.small(
+                        heroTag: "btn_admin",
+                        backgroundColor: Colors.cyanAccent.withOpacity(0.85),
+                        onPressed: () => Navigator.of(context).pushNamed('/admin'),
+                        child: const Icon(Icons.admin_panel_settings, color: Colors.black),
+                      ),
+                      const SizedBox(width: 10),
+                      // Stats Screen button
+                      FloatingActionButton.small(
+                        heroTag: "btn_stats",
+                        backgroundColor: Colors.cyanAccent.withOpacity(0.85),
+                        onPressed: () => Navigator.of(context).pushNamed('/stats'),
+                        child: const Icon(Icons.bar_chart, color: Colors.black),
+                      ),
+                    ],
+                  ),
+
+                // Camera switch button (always visible if multiple cameras)
                 if (widget.cameras.length > 1)
                   GestureDetector(
                     onTap: _toggleCamera,
                     child: Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                      child: const Icon(Icons.cameraswitch_rounded, color: Colors.cyanAccent, size: 30),
+                      decoration: const BoxDecoration(
+                        color: Colors.black45,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.cameraswitch_rounded,
+                          color: Colors.cyanAccent, size: 30),
                     ),
                   ),
               ],
@@ -214,16 +258,19 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: Colors.black87,
-                  border: Border.all(color: isMatch ? Colors.greenAccent : Colors.redAccent, width: 2),
+                  border: Border.all(
+                    color: isMatch ? Colors.greenAccent : Colors.redAccent,
+                    width: 2,
+                  ),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   isMatch ? "MATCH: $identity" : "NO MATCH FOUND",
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isMatch ? Colors.greenAccent : Colors.redAccent, 
-                    fontSize: 18, 
-                    fontWeight: FontWeight.bold
+                    color: isMatch ? Colors.greenAccent : Colors.redAccent,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
@@ -239,12 +286,18 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     padding: EdgeInsets.only(bottom: 15),
                     child: Text(
                       "☕ Server is waking up... please wait",
-                      style: TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: Colors.orangeAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 Text(
-                  _isScanning ? "ANALYZING BIOMETRICS..." : "READY TO SCAN", 
-                  style: const TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 2)
+                  _isScanning ? "ANALYZING BIOMETRICS..." : "READY TO SCAN",
+                  style: const TextStyle(
+                    color: Colors.white38, fontSize: 10, letterSpacing: 2,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 GestureDetector(
@@ -256,20 +309,24 @@ class _VerificationScreenState extends State<VerificationScreen> {
                       border: Border.all(color: Colors.cyanAccent, width: 3),
                       boxShadow: [
                         if (_isScanning)
-                          BoxShadow(color: Colors.cyanAccent.withOpacity(0.4), blurRadius: 20)
+                          BoxShadow(
+                            color: Colors.cyanAccent.withOpacity(0.4),
+                            blurRadius: 20,
+                          ),
                       ],
                     ),
                     child: Center(
-                      child: _isScanning 
-                        ? const CircularProgressIndicator(color: Colors.cyanAccent)
-                        : const Icon(Icons.camera_alt_outlined, color: Colors.cyanAccent, size: 40),
+                      child: _isScanning
+                          ? const CircularProgressIndicator(color: Colors.cyanAccent)
+                          : const Icon(Icons.camera_alt_outlined,
+                              color: Colors.cyanAccent, size: 40),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          
+
           if (_showFlash) Container(color: Colors.white.withOpacity(0.5)),
         ],
       ),
@@ -284,13 +341,12 @@ class ScannerOverlayPainter extends CustomPainter {
       ..color = Colors.cyanAccent
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0;
-    
+
     double boxSize = size.width * 0.75;
     double left = (size.width - boxSize) / 2;
     double top = (size.height - boxSize) / 2.5;
     double len = 30.0;
 
-    // Corner brackets
     canvas.drawLine(Offset(left, top), Offset(left + len, top), paint);
     canvas.drawLine(Offset(left, top), Offset(left, top + len), paint);
     canvas.drawLine(Offset(left + boxSize, top), Offset(left + boxSize - len, top), paint);

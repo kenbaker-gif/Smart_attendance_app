@@ -1,41 +1,37 @@
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart'; 
+import 'package:camera/camera.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:wakelock_plus/wakelock_plus.dart'; 
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'verification_screen.dart';
-import 'login_screen.dart'; 
+import 'login_screen.dart';
 import 'admin_screen.dart';
-import 'stats_screen.dart';           
-import 'security_wrapper.dart';       
+import 'stats_screen.dart';
+import 'security_wrapper.dart';
 
 List<CameraDescription> cameras = [];
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Keep screen on for S23 Ultra
   try {
     WakelockPlus.enable();
   } catch (e) {
     debugPrint("Wakelock error: $e");
   }
 
-  // 2. Load Environment & Supabase
   await dotenv.load(fileName: ".env");
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
-  
-  // 3. Find available cameras
+
   try {
     cameras = await availableCameras();
   } on CameraException catch (e) {
     debugPrint('Error in fetching the cameras: $e');
   }
 
-  // 4. Run the app
   runApp(const AttendanceApp());
 }
 
@@ -52,21 +48,26 @@ class AttendanceApp extends StatelessWidget {
       title: 'Smart Attendance',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
-        primaryColor: Colors.cyanAccent, 
+        primaryColor: Colors.cyanAccent,
       ),
-      // 🟢 THE RECOMMENDED WRAP: 
-      // ScaffoldMessenger allows Snackbars to work over the security layer.
       builder: (context, child) {
-        return ScaffoldMessenger(
-          child: SecurityWrapper(child: child!),
-        );
+        return ScaffoldMessenger(child: child!);
       },
+      // ✅ Everyone lands on /home — admin buttons show up conditionally there
       initialRoute: isLoggedIn ? '/home' : '/login',
       routes: {
         '/login': (context) => LoginScreen(cameras: cameras),
-        '/home': (context) => VerificationScreen(cameras: cameras),
-        '/admin': (context) => AdminScreen(cameras: cameras),
-        '/stats': (context) => const StatsScreen(),
+        '/home': (context) => SecurityWrapper(
+              child: VerificationScreen(cameras: cameras),
+            ),
+        '/admin': (context) => SecurityWrapper(
+              isAdminRoute: true,
+              child: AdminScreen(cameras: cameras),
+            ),
+        '/stats': (context) => SecurityWrapper(
+              isAdminRoute: true,
+              child: const StatsScreen(),
+            ),
       },
     );
   }
