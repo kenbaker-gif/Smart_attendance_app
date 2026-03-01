@@ -97,7 +97,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
     var result = await FlutterImageCompress.compressAndGetFile(
       file.absolute.path, outPath,
-      quality: 60, minWidth: 600, minHeight: 600,
+      quality: 40, minWidth: 400, minHeight: 400,
     );
     return File(result!.path);
   }
@@ -125,6 +125,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
       await _controller!.pausePreview();
       File fileToSend = await compressFile(File(image.path));
 
+      // ✅ InsightFace verification endpoint
       var request = http.MultipartRequest(
         'POST',
         Uri.parse('https://smartattendancemvp-production.up.railway.app/verify'),
