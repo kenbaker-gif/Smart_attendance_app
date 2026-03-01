@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:camera/camera.dart';
@@ -13,226 +12,188 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
+  final _emailController    = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isLoading = false;
+  final LocalAuthentication _auth = LocalAuthentication();
 
-  final LocalAuthentication auth = LocalAuthentication();
-  bool _canCheckBiometrics = false;
+  bool _isLoading       = false;
+  bool _obscurePassword = true;
+  bool _hasSession      = false;
 
   @override
   void initState() {
     super.initState();
-    _checkBiometrics();
+    _hasSession = Supabase.instance.client.auth.currentSession != null;
   }
 
-  Future<void> _checkBiometrics() async {
-    bool canCheckBiometrics;
-    try {
-      canCheckBiometrics =
-          await auth.canCheckBiometrics && await auth.isDeviceSupported();
-    } on PlatformException catch (e) {
-      canCheckBiometrics = false;
-      debugPrint('Biometrics check error: $e');
-    }
-    if (!mounted) return;
-    setState(() => _canCheckBiometrics = canCheckBiometrics);
-
-    // Auto-trigger biometric if a valid session already exists
-    if (_canCheckBiometrics &&
-        Supabase.instance.client.auth.currentSession != null) {
-      _authenticate();
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // ✅ Single routing method — always called after successful auth/login.
-  //    Fetches the admin flag and pushes the correct named route.
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<void> _navigateAfterLogin() async {
-    if (!mounted) return;
-    // ✅ Everyone lands on /home — VerificationScreen shows admin buttons conditionally
-    Navigator.of(context).pushReplacementNamed('/home');
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Biometric unlock (used when a session already exists)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Biometric unlock (session already exists) ──────────────────────────
   Future<void> _authenticate() async {
-    bool authenticated = false;
     try {
-      authenticated = await auth.authenticate(
-        localizedReason: 'Scan fingerprint to unlock Admin Access',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: true,
-        ),
+      final authenticated = await _auth.authenticate(
+        localizedReason: 'Scan fingerprint to unlock',
+        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
-    } on PlatformException catch (e) {
-      debugPrint('Biometric auth error: $e');
+      if (authenticated && mounted) _navigateAfterLogin();
+    } catch (e) {
+      debugPrint('Biometric error: $e');
+    }
+  }
+
+  // ── Password login ─────────────────────────────────────────────────────
+  Future<void> _login() async {
+    if (_emailController.text.trim().isEmpty ||
+        _passwordController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter email and password.")),
+      );
       return;
     }
 
-    if (!mounted) return;
-
-    if (authenticated) {
-      final session = Supabase.instance.client.auth.currentSession;
-      if (session != null) {
-        // ✅ Use shared routing — checks admin role
-        await _navigateAfterLogin();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Session expired. Please login with password."),
-          ),
-        );
-      }
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Email + password login
-  // ─────────────────────────────────────────────────────────────────────────
-  Future<void> _login() async {
     setState(() => _isLoading = true);
     try {
-      final AuthResponse res =
-          await Supabase.instance.client.auth.signInWithPassword(
+      await Supabase.instance.client.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-
-      if (res.user != null) {
-        // ✅ Use shared routing — checks admin role
-        await _navigateAfterLogin();
+      if (mounted) _navigateAfterLogin();
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+        );
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Access Denied: Wrong Credentials"),
-          backgroundColor: Colors.red,
-        ),
-      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Navigate to /home after any successful auth ────────────────────────
+  void _navigateAfterLogin() {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacementNamed('/home');
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bool hasSession =
-        Supabase.instance.client.auth.currentSession != null;
-
     return Scaffold(
       backgroundColor: Colors.black,
-      // ✅ SingleChildScrollView prevents the overflow when keyboard appears
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: MediaQuery.of(context).size.height,
-          ),
-          child: IntrinsicHeight(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock_person, size: 80, color: Colors.cyanAccent),
-                const SizedBox(height: 20),
-                Text(
-                  hasSession ? "Welcome Back" : "Admin Login",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 40),
-
-                if (!hasSession) ...[
-                  TextField(
-                    controller: _emailController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      prefixIcon: Icon(Icons.email, color: Colors.cyanAccent),
-                      labelStyle: TextStyle(color: Colors.grey),
-                      enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white)),
-                      focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.cyanAccent)),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top -
+                  MediaQuery.of(context).padding.bottom,
+            ),
+            child: IntrinsicHeight(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.face_retouching_natural,
+                        size: 80, color: Colors.cyanAccent),
+                    const SizedBox(height: 16),
+                    Text(
+                      _hasSession ? "Welcome Back" : "Smart Attendance",
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: "Password",
-                      prefixIcon: Icon(Icons.key, color: Colors.cyanAccent),
-                      labelStyle: TextStyle(color: Colors.grey),
-                      enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white)),
-                      focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.cyanAccent)),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                ],
+                    const SizedBox(height: 8),
+                    const Text("Sign in to continue",
+                        style: TextStyle(color: Colors.grey)),
+                    const SizedBox(height: 40),
 
-                if (!hasSession)
-                  _isLoading
-                      ? const CircularProgressIndicator(
-                          color: Colors.cyanAccent)
-                      : SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: ElevatedButton(
-                            onPressed: _login,
+                    // Email
+                    TextField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _inputDecoration("Email", Icons.email),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Password
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _inputDecoration(
+                        "Password",
+                        Icons.lock,
+                        suffix: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: Colors.grey,
+                          ),
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Login button
+                    _isLoading
+                        ? const CircularProgressIndicator(
+                            color: Colors.cyanAccent)
+                        : ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.cyanAccent),
-                            child: const Text(
-                              "LOGIN",
-                              style: TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold),
+                              backgroundColor: Colors.cyanAccent,
+                              foregroundColor: Colors.black,
+                              minimumSize: const Size(double.infinity, 50),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
                             ),
+                            onPressed: _login,
+                            child: const Text("LOGIN",
+                                style: TextStyle(fontWeight: FontWeight.bold)),
                           ),
-                        ),
 
-                if (_canCheckBiometrics) ...[
-                  const SizedBox(height: 40),
-                  GestureDetector(
-                    onTap: _authenticate,
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.cyanAccent.withOpacity(0.5),
-                              width: 2,
-                            ),
-                          ),
-                          child: const Icon(Icons.fingerprint,
-                              size: 50, color: Colors.cyanAccent),
+                    // Biometric button (only if session exists)
+                    if (_hasSession) ...[
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.cyanAccent,
+                          side: const BorderSide(color: Colors.cyanAccent),
+                          minimumSize: const Size(double.infinity, 50),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
                         ),
-                        const SizedBox(height: 10),
-                        const Text("Tap to Unlock",
-                            style: TextStyle(color: Colors.cyanAccent)),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
+                        onPressed: _authenticate,
+                        icon: const Icon(Icons.fingerprint),
+                        label: const Text("USE FINGERPRINT"),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(String label, IconData icon,
+      {Widget? suffix}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.grey),
+      prefixIcon: Icon(icon, color: Colors.cyanAccent),
+      suffixIcon: suffix,
+      enabledBorder: OutlineInputBorder(
+        borderSide: const BorderSide(color: Colors.grey),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderSide: const BorderSide(color: Colors.cyanAccent),
+        borderRadius: BorderRadius.circular(10),
       ),
     );
   }

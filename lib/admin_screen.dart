@@ -8,10 +8,10 @@ import 'package:http/http.dart' as http;
 
 // ── 4 capture steps ────────────────────────────────────────────────────────
 const List<Map<String, dynamic>> _captureSteps = [
-  {"label": "FRONT",      "instruction": "Look straight at the camera",     "icon": Icons.face},
+  {"label": "FRONT",      "instruction": "Look straight at the camera",          "icon": Icons.face},
   {"label": "LEFT SIDE",  "instruction": "Turn your head slightly to the left",  "icon": Icons.arrow_back},
   {"label": "RIGHT SIDE", "instruction": "Turn your head slightly to the right", "icon": Icons.arrow_forward},
-  {"label": "LOOK UP",    "instruction": "Tilt your head slightly upward",   "icon": Icons.arrow_upward},
+  {"label": "LOOK UP",    "instruction": "Tilt your head slightly upward",        "icon": Icons.arrow_upward},
 ];
 
 class AdminScreen extends StatefulWidget {
@@ -26,9 +26,13 @@ class _AdminScreenState extends State<AdminScreen> {
   final _nameController = TextEditingController();
   final _idController   = TextEditingController();
 
-  // 4 image slots — null means not yet captured
+  // Institution context — fetched once on load
+  String? _institutionId;   // e.g. 'MUK' or 'NKU'
+  String? _institutionName; // e.g. 'Makerere University'
+
+  // 4 image slots
   final List<File?> _capturedImages = [null, null, null, null];
-  int _currentStep = 0; // which angle we're currently capturing
+  int _currentStep = 0;
 
   bool _isUploading = false;
   List<Map<String, dynamic>> _students = [];
@@ -41,51 +45,74 @@ class _AdminScreenState extends State<AdminScreen> {
   void initState() {
     super.initState();
     _checkAccess();
-    _loadStudents();
   }
 
-  // ── Auth guard ─────────────────────────────────────────────────────────
+  // ── Auth + institution fetch ───────────────────────────────────────────
   Future<void> _checkAccess() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) { _kickOut(); return; }
+
       final data = await Supabase.instance.client
           .from('profiles')
-          .select('is_admin')
+          .select('is_admin, institution_id, institutions(name)')
           .eq('id', user.id)
           .maybeSingle();
-      if (data == null || data['is_admin'] != true) _kickOut();
-    } catch (_) { _kickOut(); }
+
+      if (data == null || data['is_admin'] != true) {
+        _kickOut();
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _institutionId   = data['institution_id'];
+          _institutionName = data['institutions']?['name'] ?? _institutionId;
+        });
+      }
+
+      await _loadStudents();
+    } catch (e) {
+      _kickOut();
+    }
   }
 
   void _kickOut() {
     if (mounted) {
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Unauthorized Access"), backgroundColor: Colors.red),
+        const SnackBar(
+            content: Text("Unauthorized Access"), backgroundColor: Colors.red),
       );
     }
   }
 
-  // ── Load students ──────────────────────────────────────────────────────
+  // ── Load students scoped to this institution ───────────────────────────
   Future<void> _loadStudents() async {
     try {
-      final data = await Supabase.instance.client
-          .from('students')
-          .select()
-          .order('created_at', ascending: false);
+      // .eq() must come before .order() in this Supabase version
+      final data = _institutionId != null
+          ? await Supabase.instance.client
+              .from('students')
+              .select()
+              .eq('institution_id', _institutionId!)
+              .order('created_at', ascending: false)
+          : await Supabase.instance.client
+              .from('students')
+              .select()
+              .order('created_at', ascending: false);
       if (mounted) {
         setState(() {
           _students = List<Map<String, dynamic>>.from(data);
           _isLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ── Capture one image for the current step ─────────────────────────────
+  // ── Capture one image for a step ──────────────────────────────────────
   Future<void> _captureStep(int stepIndex) async {
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(
@@ -97,13 +124,11 @@ class _AdminScreenState extends State<AdminScreen> {
 
     setState(() {
       _capturedImages[stepIndex] = File(image.path);
-      // Automatically advance to next uncaptured step
       final nextEmpty = _capturedImages.indexWhere((f) => f == null);
       _currentStep = nextEmpty == -1 ? stepIndex : nextEmpty;
     });
   }
 
-  // ── Re-capture a specific step ─────────────────────────────────────────
   void _retakeStep(int stepIndex) {
     setState(() {
       _capturedImages[stepIndex] = null;
@@ -112,25 +137,28 @@ class _AdminScreenState extends State<AdminScreen> {
     _captureStep(stepIndex);
   }
 
-  // ── Register ───────────────────────────────────────────────────────────
+  // ── Register student ───────────────────────────────────────────────────
   Future<void> _registerStudent() async {
     final name = _nameController.text.trim();
-    final id   = _idController.text.trim();
+    final rawId = _idController.text.trim();
 
-    if (name.isEmpty || id.isEmpty) {
+    if (name.isEmpty || rawId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter Full Name and Student ID.")),
       );
       return;
     }
 
-    final captured = _capturedImages.where((f) => f != null).length;
-    if (captured == 0) {
+    if (_capturedImages.where((f) => f != null).isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Capture at least one photo before registering.")),
+        const SnackBar(
+            content: Text("Capture at least one photo before registering.")),
       );
       return;
     }
+
+    // Use student ID as-is — institution_id column separates institutions
+    final prefixedId = rawId;
 
     setState(() => _isUploading = true);
 
@@ -139,19 +167,18 @@ class _AdminScreenState extends State<AdminScreen> {
 
     for (int i = 0; i < _capturedImages.length; i++) {
       final file = _capturedImages[i];
-      if (file == null) continue; // skipped step — no photo taken
-
-      final fileName = "${i + 1}.jpg";
+      if (file == null) continue;
 
       try {
         var request = http.MultipartRequest('POST', Uri.parse(registrationUrl));
         request.files.add(await http.MultipartFile.fromPath(
           'file',
           file.path,
-          filename: fileName,
+          filename: '${i + 1}.jpg', // saves as 1.jpg, 2.jpg, 3.jpg, 4.jpg
         ));
-        request.fields['student_id'] = id;
-        request.fields['name']       = name;
+        request.fields['student_id']     = prefixedId;
+        request.fields['name']           = name;
+        request.fields['institution_id'] = _institutionId ?? '';
 
         final response = await http.Response.fromStream(
           await request.send().timeout(const Duration(seconds: 40)),
@@ -173,12 +200,6 @@ class _AdminScreenState extends State<AdminScreen> {
       setState(() => _isUploading = false);
 
       if (successCount > 0) {
-        // Upsert student in DB (in case no upload wrote it yet)
-        await Supabase.instance.client.from('students').upsert({
-          'id':   id,
-          'name': name,
-        });
-
         final msg = failCount == 0
             ? "✅ Registered $successCount/4 images successfully!"
             : "⚠️ $successCount uploaded, $failCount failed (skipped).";
@@ -190,7 +211,6 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
         );
 
-        // Reset form
         _nameController.clear();
         _idController.clear();
         setState(() {
@@ -218,12 +238,24 @@ class _AdminScreenState extends State<AdminScreen> {
         backgroundColor: Colors.black,
         appBar: AppBar(
           backgroundColor: Colors.black,
-          title: const Text("Admin Portal", style: TextStyle(color: Colors.orangeAccent)),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Admin Portal",
+                  style: TextStyle(color: Colors.orangeAccent)),
+              if (_institutionName != null)
+                Text(
+                  _institutionName!,
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
+                ),
+            ],
+          ),
           actions: [
             TextButton.icon(
               onPressed: () => Navigator.of(context).pushNamed('/stats'),
               icon: const Icon(Icons.bar_chart, color: Colors.cyanAccent),
-              label: const Text("STATS", style: TextStyle(color: Colors.cyanAccent)),
+              label:
+                  const Text("STATS", style: TextStyle(color: Colors.cyanAccent)),
             ),
           ],
           bottom: const TabBar(
@@ -256,11 +288,26 @@ class _AdminScreenState extends State<AdminScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Institution badge
+          if (_institutionId != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.orangeAccent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orangeAccent.withOpacity(0.4)),
+              ),
+              child: Text(
+                "Institution: $_institutionName ($_institutionId)",
+                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+              ),
+            ),
+          const SizedBox(height: 16),
 
-          // Progress indicator
+          // Progress bar
           Row(
             children: List.generate(4, (i) {
-              final done = _capturedImages[i] != null;
+              final done   = _capturedImages[i] != null;
               final active = i == _currentStep && !done;
               return Expanded(
                 child: Container(
@@ -279,10 +326,8 @@ class _AdminScreenState extends State<AdminScreen> {
             }),
           ),
           const SizedBox(height: 8),
-          Text(
-            "$capturedCount / 4 photos captured",
-            style: const TextStyle(color: Colors.grey, fontSize: 12),
-          ),
+          Text("$capturedCount / 4 photos captured",
+              style: const TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 20),
 
           // 4 capture tiles
@@ -301,21 +346,50 @@ class _AdminScreenState extends State<AdminScreen> {
 
           const SizedBox(height: 28),
 
-          // Name + ID fields
+          // ID field — shows prefixed preview
           _buildTextField(_nameController, "Full Name", Icons.badge),
           const SizedBox(height: 16),
-          _buildTextField(_idController, "Student ID Number", Icons.numbers),
+          TextField(
+            controller: _idController,
+            style: const TextStyle(color: Colors.white),
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: "Student ID Number",
+              labelStyle: const TextStyle(color: Colors.grey),
+              prefixIcon:
+                  const Icon(Icons.numbers, color: Colors.orangeAccent),
+              // ✅ Show the prefixed ID as a hint
+              helperText: _idController.text.isNotEmpty && _institutionId != null
+                  ? "Will be saved as: $_institutionId${_idController.text}"
+                  : "e.g. 2400102415 → saved as ${_institutionId ?? ''}2400102415",
+              helperStyle:
+                  const TextStyle(color: Colors.grey, fontSize: 11),
+              enabledBorder: OutlineInputBorder(
+                borderSide: const BorderSide(color: Colors.grey),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide: const BorderSide(color: Colors.orangeAccent),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
           const SizedBox(height: 32),
 
           // Register button
           _isUploading
-              ? const Center(child: CircularProgressIndicator(color: Colors.orangeAccent))
+              ? const Center(
+                  child:
+                      CircularProgressIndicator(color: Colors.orangeAccent))
               : ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: allCaptured ? Colors.orangeAccent : Colors.grey[700],
+                    backgroundColor:
+                        allCaptured ? Colors.orangeAccent : Colors.grey[700],
                     foregroundColor: Colors.black,
                     minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: _registerStudent,
                   child: Text(
@@ -330,7 +404,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  // ── Single capture tile ────────────────────────────────────────────────
   Widget _buildCaptureTile(int i) {
     final step    = _captureSteps[i];
     final file    = _capturedImages[i];
@@ -354,53 +427,59 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
         child: Stack(
           children: [
-            // Image or placeholder
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: isDone
-                  ? Image.file(file!, fit: BoxFit.cover, width: double.infinity, height: double.infinity)
+                  ? Image.file(file!,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity)
                   : Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(step['icon'] as IconData,
-                              color: isActive ? Colors.orangeAccent : Colors.grey,
+                              color: isActive
+                                  ? Colors.orangeAccent
+                                  : Colors.grey,
                               size: 36),
                           const SizedBox(height: 8),
                           Text(
                             step['label'] as String,
                             style: TextStyle(
-                              color: isActive ? Colors.orangeAccent : Colors.grey,
+                              color: isActive
+                                  ? Colors.orangeAccent
+                                  : Colors.grey,
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
                             child: Text(
                               step['instruction'] as String,
                               textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.grey, fontSize: 10),
+                              style: const TextStyle(
+                                  color: Colors.grey, fontSize: 10),
                             ),
                           ),
                         ],
                       ),
                     ),
             ),
-
-            // Done badge
             if (isDone)
               Positioned(
                 top: 6, right: 6,
                 child: Container(
                   padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-                  child: const Icon(Icons.check, color: Colors.white, size: 14),
+                  decoration: const BoxDecoration(
+                      color: Colors.green, shape: BoxShape.circle),
+                  child: const Icon(Icons.check,
+                      color: Colors.white, size: 14),
                 ),
               ),
-
-            // Retake label on done tiles
             if (isDone)
               Positioned(
                 bottom: 0, left: 0, right: 0,
@@ -408,24 +487,27 @@ class _AdminScreenState extends State<AdminScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.6),
-                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                    borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(12)),
                   ),
                   child: Text(
                     "TAP TO RETAKE  •  ${step['label']}",
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white70, fontSize: 9),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 9),
                   ),
                 ),
               ),
-
-            // Active pulse border indicator
             if (isActive)
-              Positioned(
+              const Positioned(
                 bottom: 6, left: 0, right: 0,
-                child: const Text(
+                child: Text(
                   "TAP TO CAPTURE",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      color: Colors.orangeAccent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
           ],
@@ -434,7 +516,8 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon) {
+  Widget _buildTextField(
+      TextEditingController controller, String label, IconData icon) {
     return TextField(
       controller: controller,
       style: const TextStyle(color: Colors.white),
@@ -456,8 +539,13 @@ class _AdminScreenState extends State<AdminScreen> {
 
   // ── Student list ───────────────────────────────────────────────────────
   Widget _buildStudentList() {
-    if (_isLoading) return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
-    if (_students.isEmpty) return const Center(child: Text("No students registered.", style: TextStyle(color: Colors.grey)));
+    if (_isLoading)
+      return const Center(
+          child: CircularProgressIndicator(color: Colors.orangeAccent));
+    if (_students.isEmpty)
+      return const Center(
+          child: Text("No students registered.",
+              style: TextStyle(color: Colors.grey)));
 
     return ListView.separated(
       padding: const EdgeInsets.all(16),
@@ -478,10 +566,13 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
           title: Text(
             student['name'] ?? "No Name",
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold),
           ),
-          subtitle: Text("ID: $studentId", style: const TextStyle(color: Colors.grey)),
-          trailing: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+          subtitle: Text("ID: $studentId",
+              style: const TextStyle(color: Colors.grey)),
+          trailing: const Icon(Icons.check_circle,
+              color: Colors.green, size: 20),
         );
       },
     );
