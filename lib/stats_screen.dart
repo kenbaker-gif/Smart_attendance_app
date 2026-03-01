@@ -10,62 +10,57 @@ class StatsScreen extends StatefulWidget {
 
 class _StatsScreenState extends State<StatsScreen> {
   late final WebViewController _controller;
-  bool _isLoading = true; // Tracks if the Railway page is still loading
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    
-    // Initialize the WebViewController
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black) // Matches your app theme
+      ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (String url) {
-            setState(() {
-              _isLoading = true;
-            });
-          },
-          onPageFinished: (String url) {
-            // Hide the spinner once the dashboard is ready
-            setState(() {
-              _isLoading = false;
-            });
-          },
+          onPageStarted: (_) => setState(() => _isLoading = true),
+          onPageFinished: (_) => setState(() => _isLoading = false),
           onWebResourceError: (WebResourceError error) {
             debugPrint("WebView Error: ${error.description}");
           },
         ),
       )
-      ..loadRequest(
-        Uri.parse('https://eloquent-renewal-production.up.railway.app/'),
-      );
+      // ✅ Your Streamlit dashboard URL
+      ..loadRequest(Uri.parse('https://eloquent-renewal-production.up.railway.app/'));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text("Attendance Statistics"),
+        title: const Text(
+          "Attendance Statistics",
+          style: TextStyle(
+            color: Colors.cyanAccent,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            letterSpacing: 1,
+          ),
+        ),
         backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.cyanAccent),
         actions: [
-          // Refresh button in case Railway needs a nudge
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.cyanAccent),
             onPressed: () => _controller.reload(),
+            tooltip: "Refresh",
           ),
         ],
       ),
       body: Stack(
         children: [
-          // The actual Railway Dashboard
           WebViewWidget(controller: _controller),
-          
-          // The Loading Spinner (only shows when _isLoading is true)
           if (_isLoading)
             Container(
-              color: Colors.black, // Covers the white flash during initial load
+              color: Colors.black,
               child: const Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -73,8 +68,12 @@ class _StatsScreenState extends State<StatsScreen> {
                     CircularProgressIndicator(color: Colors.cyanAccent),
                     SizedBox(height: 20),
                     Text(
-                      "Connecting to Railway...",
-                      style: TextStyle(color: Colors.white70),
+                      "Loading Dashboard...",
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        letterSpacing: 1.5,
+                      ),
                     ),
                   ],
                 ),
