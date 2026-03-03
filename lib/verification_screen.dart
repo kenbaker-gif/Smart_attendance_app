@@ -40,11 +40,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
-    final data = await Supabase.instance.client
+    final result = await Supabase.instance.client
         .from('profiles')
         .select('is_admin')
         .eq('id', user.id)
-        .maybeSingle();
+        .limit(1);
+    final data = result.isNotEmpty ? result.first : null;
 
     if (mounted) {
       setState(() => _isAdmin = data != null && data['is_admin'] == true);

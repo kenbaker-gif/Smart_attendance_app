@@ -94,11 +94,12 @@ class _SecurityWrapperState extends State<SecurityWrapper>
     final user = Supabase.instance.client.auth.currentUser;
     bool isAdmin = false;
     if (user != null) {
-      final data = await Supabase.instance.client
+      final result = await Supabase.instance.client
           .from('profiles')
           .select('is_admin')
           .eq('id', user.id)
-          .maybeSingle();
+          .limit(1);
+      final data = result.isNotEmpty ? result.first : null;
 
       isAdmin = data != null && data['is_admin'] == true;
     }

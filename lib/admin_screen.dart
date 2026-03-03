@@ -53,11 +53,12 @@ class _AdminScreenState extends State<AdminScreen> {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) { _kickOut(); return; }
 
-      final data = await Supabase.instance.client
+      final result = await Supabase.instance.client
           .from('profiles')
           .select('is_admin, institution_id, institutions(name)')
           .eq('id', user.id)
-          .maybe_single();
+          .limit(1);
+      final data = result.isNotEmpty ? result.first : null;
 
       if (data == null || data['is_admin'] != true) {
         _kickOut();
@@ -552,15 +553,30 @@ class _AdminScreenState extends State<AdminScreen> {
       itemBuilder: (context, index) {
         final student   = _students[index];
         final studentId = student['id'].toString();
+        final instId    = student['institution_id']?.toString() ?? _institutionId ?? 'NKU';
         final imageUrl  =
-            "https://xrlsltunfgjxooyyrora.supabase.co/storage/v1/object/public/raw_faces/${student['institution_id'] ?? 'NKU'}/$studentId/1.jpg?t=${DateTime.now().millisecondsSinceEpoch}";
+            "https://xrlsltunfgjxooyyrora.supabase.co/storage/v1/object/public/raw_faces/$instId/$studentId/1.jpg";
 
         return ListTile(
           leading: CircleAvatar(
             backgroundColor: Colors.grey[800],
-            backgroundImage: NetworkImage(imageUrl),
-            onBackgroundImageError: (_, __) {},
-            child: const Icon(Icons.person, color: Colors.white24),
+            child: ClipOval(
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                width: 40,
+                height: 40,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.person, color: Colors.white54),
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.orangeAccent),
+                      ),
+              ),
+            ),
           ),
           title: Text(
             student['name'] ?? "No Name",
