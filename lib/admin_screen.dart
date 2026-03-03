@@ -57,7 +57,7 @@ class _AdminScreenState extends State<AdminScreen> {
           .from('profiles')
           .select('is_admin, institution_id, institutions(name)')
           .eq('id', user.id)
-          .maybeSingle();
+          .maybe_single();
 
       if (data == null || data['is_admin'] != true) {
         _kickOut();
@@ -359,9 +359,7 @@ class _AdminScreenState extends State<AdminScreen> {
               prefixIcon:
                   const Icon(Icons.numbers, color: Colors.orangeAccent),
               // ✅ Show the prefixed ID as a hint
-              helperText: _idController.text.isNotEmpty && _institutionId != null
-                  ? "Will be saved as: $_institutionId${_idController.text}"
-                  : "e.g. 2400102415 → saved as ${_institutionId ?? ''}2400102415",
+              helperText: "e.g. 2400102415",
               helperStyle:
                   const TextStyle(color: Colors.grey, fontSize: 11),
               enabledBorder: OutlineInputBorder(
@@ -555,7 +553,7 @@ class _AdminScreenState extends State<AdminScreen> {
         final student   = _students[index];
         final studentId = student['id'].toString();
         final imageUrl  =
-            "https://xrlsltunfgjxooyyrora.supabase.co/storage/v1/object/public/raw_faces/$studentId/1.jpg?t=${DateTime.now().millisecondsSinceEpoch}";
+            "https://xrlsltunfgjxooyyrora.supabase.co/storage/v1/object/public/raw_faces/${student['institution_id'] ?? 'NKU'}/$studentId/1.jpg?t=${DateTime.now().millisecondsSinceEpoch}";
 
         return ListTile(
           leading: CircleAvatar(
