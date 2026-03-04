@@ -1,7 +1,7 @@
 name: smart_attendance_app
 description: "A new Flutter project."
 publish_to: 'none'
-version: 1.0.0+9
+version: 1.0.0+10
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -16,6 +16,9 @@ dependencies:
 
   # Authentication
   supabase_flutter: ^2.8.0 
+
+  # Google Sign-In
+  google_sign_in: ^6.2.1
 
   # Storage (REQUIRED for security wrapper)
   shared_preferences: ^2.2.2

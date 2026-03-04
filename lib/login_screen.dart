@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:camera/camera.dart';
+import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -26,7 +27,6 @@ class _LoginScreenState extends State<LoginScreen> {
     _hasSession = Supabase.instance.client.auth.currentSession != null;
   }
 
-  // ── Biometric unlock (session already exists) ──────────────────────────
   Future<void> _authenticate() async {
     try {
       final authenticated = await _auth.authenticate(
@@ -39,7 +39,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ── Password login ─────────────────────────────────────────────────────
   Future<void> _login() async {
     if (_emailController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
@@ -67,7 +66,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ── Navigate to /home after any successful auth ────────────────────────
   void _navigateAfterLogin() {
     if (!mounted) return;
     Navigator.of(context).pushReplacementNamed('/home');
@@ -170,6 +168,38 @@ class _LoginScreenState extends State<LoginScreen> {
                         label: const Text("USE FINGERPRINT"),
                       ),
                     ],
+
+                    // ── Register university button ──────────────────────
+                    const SizedBox(height: 32),
+                    const Row(
+                      children: [
+                        Expanded(child: Divider(color: Colors.grey)),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Text("OR", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        ),
+                        Expanded(child: Divider(color: Colors.grey)),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.cyanAccent,
+                        side: const BorderSide(color: Colors.grey),
+                        minimumSize: const Size(double.infinity, 50),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SignupScreen(cameras: widget.cameras),
+                        ),
+                      ),
+                      icon: const Icon(Icons.school_outlined, size: 20),
+                      label: const Text("REGISTER YOUR UNIVERSITY"),
+                    ),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),

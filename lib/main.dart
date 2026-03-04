@@ -8,6 +8,7 @@ import 'login_screen.dart';
 import 'admin_screen.dart';
 import 'stats_screen.dart';
 import 'security_wrapper.dart';
+import 'signup_screen.dart';
 
 List<CameraDescription> cameras = [];
 
