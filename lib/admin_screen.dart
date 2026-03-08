@@ -113,6 +113,19 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  // ── Signed URL for private bucket ─────────────────────────────────────
+  Future<String?> _getSignedUrl(String filePath) async {
+    try {
+      final response = await Supabase.instance.client.storage
+          .from('raw_faces')
+          .createSignedUrl(filePath, 60 * 60); // 1 hour expiry
+      return response;
+    } catch (e) {
+      debugPrint("Signed URL error: $e");
+      return null;
+    }
+  }
+
   // ── Capture one image for a step ──────────────────────────────────────
   Future<void> _captureStep(int stepIndex) async {
     final picker = ImagePicker();
@@ -174,7 +187,7 @@ class _AdminScreenState extends State<AdminScreen> {
       try {
         var request = http.MultipartRequest('POST', Uri.parse(registrationUrl));
 
-        // ✅ Auth header added
+        // ✅ Auth header
         request.headers['Authorization'] = 'Bearer $token';
 
         request.files.add(await http.MultipartFile.fromPath(
@@ -193,7 +206,6 @@ class _AdminScreenState extends State<AdminScreen> {
         if (response.statusCode == 200) {
           successCount++;
         } else if (response.statusCode == 401) {
-          // Session expired mid-upload — stop early
           failCount += (_capturedImages.length - i);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -539,7 +551,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  // ── Student list ───────────────────────────────────────────────────────
+  // ── Student list with signed URLs ──────────────────────────────────────
   Widget _buildStudentList() {
     if (_isLoading)
       return const Center(
@@ -557,43 +569,49 @@ class _AdminScreenState extends State<AdminScreen> {
         final student   = _students[index];
         final studentId = student['id'].toString();
         final instId    = student['institution_id']?.toString() ?? _institutionId ?? 'NKU';
+        final filePath  = '$instId/$studentId/1.jpg';
 
-        // ✅ Note: image URL uses authenticated storage download in production
-        // For now using public URL pattern — will update after storage policy is live
-        final imageUrl =
-            "https://xrlsltunfgjxooyyrora.supabase.co/storage/v1/object/public/raw_faces/$instId/$studentId/1.jpg";
-
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Colors.grey[800],
-            child: ClipOval(
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                width: 40,
-                height: 40,
-                errorBuilder: (_, __, ___) =>
-                    const Icon(Icons.person, color: Colors.white54),
-                loadingBuilder: (_, child, progress) => progress == null
-                    ? child
-                    : const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.orangeAccent),
-                      ),
+        return FutureBuilder<String?>(
+          future: _getSignedUrl(filePath),
+          builder: (context, snapshot) {
+            final imageUrl = snapshot.data;
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.grey[800],
+                child: ClipOval(
+                  child: imageUrl != null
+                      ? Image.network(
+                          imageUrl,
+                          fit: BoxFit.cover,
+                          width: 40,
+                          height: 40,
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.person, color: Colors.white54),
+                          loadingBuilder: (_, child, progress) =>
+                              progress == null
+                                  ? child
+                                  : const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.orangeAccent),
+                                    ),
+                        )
+                      : const Icon(Icons.person, color: Colors.white54),
+                ),
               ),
-            ),
-          ),
-          title: Text(
-            student['name'] ?? "No Name",
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          subtitle: Text("ID: $studentId",
-              style: const TextStyle(color: Colors.grey)),
-          trailing:
-              const Icon(Icons.check_circle, color: Colors.green, size: 20),
+              title: Text(
+                student['name'] ?? "No Name",
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text("ID: $studentId",
+                  style: const TextStyle(color: Colors.grey)),
+              trailing: const Icon(Icons.check_circle,
+                  color: Colors.green, size: 20),
+            );
+          },
         );
       },
     );
