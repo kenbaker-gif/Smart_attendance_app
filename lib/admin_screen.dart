@@ -27,8 +27,8 @@ class _AdminScreenState extends State<AdminScreen> {
   final _idController   = TextEditingController();
 
   // Institution context — fetched once on load
-  String? _institutionId;   // e.g. 'MUK' or 'NKU'
-  String? _institutionName; // e.g. 'Makerere University'
+  String? _institutionId;
+  String? _institutionName;
 
   // 4 image slots
   final List<File?> _capturedImages = [null, null, null, null];
@@ -38,8 +38,9 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Map<String, dynamic>> _students = [];
   bool _isLoading = true;
 
+  // ✅ Fixed: updated to correct active Railway service
   final String registrationUrl =
-      "https://lovely-imagination-production.up.railway.app/upload-student-face";
+      "https://dazzling-intuition-production-297b.up.railway.app/upload-student-face";
 
   @override
   void initState() {
@@ -91,7 +92,6 @@ class _AdminScreenState extends State<AdminScreen> {
   // ── Load students scoped to this institution ───────────────────────────
   Future<void> _loadStudents() async {
     try {
-      // .eq() must come before .order() in this Supabase version
       final data = _institutionId != null
           ? await Supabase.instance.client
               .from('students')
@@ -140,7 +140,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   // ── Register student ───────────────────────────────────────────────────
   Future<void> _registerStudent() async {
-    final name = _nameController.text.trim();
+    final name  = _nameController.text.trim();
     final rawId = _idController.text.trim();
 
     if (name.isEmpty || rawId.isEmpty) {
@@ -158,10 +158,11 @@ class _AdminScreenState extends State<AdminScreen> {
       return;
     }
 
-    // Use student ID as-is — institution_id column separates institutions
-    final prefixedId = rawId;
-
     setState(() => _isUploading = true);
+
+    // ✅ Get Supabase session token once before the loop
+    final session = Supabase.instance.client.auth.currentSession;
+    final token   = session?.accessToken ?? '';
 
     int successCount = 0;
     int failCount    = 0;
@@ -172,12 +173,16 @@ class _AdminScreenState extends State<AdminScreen> {
 
       try {
         var request = http.MultipartRequest('POST', Uri.parse(registrationUrl));
+
+        // ✅ Auth header added
+        request.headers['Authorization'] = 'Bearer $token';
+
         request.files.add(await http.MultipartFile.fromPath(
           'file',
           file.path,
-          filename: '${i + 1}.jpg', // saves as 1.jpg, 2.jpg, 3.jpg, 4.jpg
+          filename: '${i + 1}.jpg',
         ));
-        request.fields['student_id']     = prefixedId;
+        request.fields['student_id']     = rawId;
         request.fields['name']           = name;
         request.fields['institution_id'] = _institutionId ?? '';
 
@@ -187,6 +192,18 @@ class _AdminScreenState extends State<AdminScreen> {
 
         if (response.statusCode == 200) {
           successCount++;
+        } else if (response.statusCode == 401) {
+          // Session expired mid-upload — stop early
+          failCount += (_capturedImages.length - i);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Session expired. Please log in again."),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          break;
         } else {
           failCount++;
           debugPrint("Upload failed for image ${i + 1}: ${response.body}");
@@ -255,8 +272,8 @@ class _AdminScreenState extends State<AdminScreen> {
             TextButton.icon(
               onPressed: () => Navigator.of(context).pushNamed('/stats'),
               icon: const Icon(Icons.bar_chart, color: Colors.cyanAccent),
-              label:
-                  const Text("STATS", style: TextStyle(color: Colors.cyanAccent)),
+              label: const Text("STATS",
+                  style: TextStyle(color: Colors.cyanAccent)),
             ),
           ],
           bottom: const TabBar(
@@ -289,7 +306,6 @@ class _AdminScreenState extends State<AdminScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Institution badge
           if (_institutionId != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -347,7 +363,6 @@ class _AdminScreenState extends State<AdminScreen> {
 
           const SizedBox(height: 28),
 
-          // ID field — shows prefixed preview
           _buildTextField(_nameController, "Full Name", Icons.badge),
           const SizedBox(height: 16),
           TextField(
@@ -357,12 +372,9 @@ class _AdminScreenState extends State<AdminScreen> {
             decoration: InputDecoration(
               labelText: "Student ID Number",
               labelStyle: const TextStyle(color: Colors.grey),
-              prefixIcon:
-                  const Icon(Icons.numbers, color: Colors.orangeAccent),
-              // ✅ Show the prefixed ID as a hint
+              prefixIcon: const Icon(Icons.numbers, color: Colors.orangeAccent),
               helperText: "e.g. 2400102415",
-              helperStyle:
-                  const TextStyle(color: Colors.grey, fontSize: 11),
+              helperStyle: const TextStyle(color: Colors.grey, fontSize: 11),
               enabledBorder: OutlineInputBorder(
                 borderSide: const BorderSide(color: Colors.grey),
                 borderRadius: BorderRadius.circular(10),
@@ -376,11 +388,9 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
           const SizedBox(height: 32),
 
-          // Register button
           _isUploading
               ? const Center(
-                  child:
-                      CircularProgressIndicator(color: Colors.orangeAccent))
+                  child: CircularProgressIndicator(color: Colors.orangeAccent))
               : ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor:
@@ -404,9 +414,9 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Widget _buildCaptureTile(int i) {
-    final step    = _captureSteps[i];
-    final file    = _capturedImages[i];
-    final isDone  = file != null;
+    final step     = _captureSteps[i];
+    final file     = _capturedImages[i];
+    final isDone   = file != null;
     final isActive = i == _currentStep && !isDone;
 
     return GestureDetector(
@@ -438,25 +448,20 @@ class _AdminScreenState extends State<AdminScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(step['icon'] as IconData,
-                              color: isActive
-                                  ? Colors.orangeAccent
-                                  : Colors.grey,
+                              color: isActive ? Colors.orangeAccent : Colors.grey,
                               size: 36),
                           const SizedBox(height: 8),
                           Text(
                             step['label'] as String,
                             style: TextStyle(
-                              color: isActive
-                                  ? Colors.orangeAccent
-                                  : Colors.grey,
+                              color: isActive ? Colors.orangeAccent : Colors.grey,
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
                             child: Text(
                               step['instruction'] as String,
                               textAlign: TextAlign.center,
@@ -475,8 +480,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   padding: const EdgeInsets.all(3),
                   decoration: const BoxDecoration(
                       color: Colors.green, shape: BoxShape.circle),
-                  child: const Icon(Icons.check,
-                      color: Colors.white, size: 14),
+                  child: const Icon(Icons.check, color: Colors.white, size: 14),
                 ),
               ),
             if (isDone)
@@ -492,8 +496,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   child: Text(
                     "TAP TO RETAKE  •  ${step['label']}",
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 9),
+                    style: const TextStyle(color: Colors.white70, fontSize: 9),
                   ),
                 ),
               ),
@@ -554,7 +557,10 @@ class _AdminScreenState extends State<AdminScreen> {
         final student   = _students[index];
         final studentId = student['id'].toString();
         final instId    = student['institution_id']?.toString() ?? _institutionId ?? 'NKU';
-        final imageUrl  =
+
+        // ✅ Note: image URL uses authenticated storage download in production
+        // For now using public URL pattern — will update after storage policy is live
+        final imageUrl =
             "https://xrlsltunfgjxooyyrora.supabase.co/storage/v1/object/public/raw_faces/$instId/$studentId/1.jpg";
 
         return ListTile(
@@ -571,9 +577,10 @@ class _AdminScreenState extends State<AdminScreen> {
                 loadingBuilder: (_, child, progress) => progress == null
                     ? child
                     : const SizedBox(
-                        width: 20, height: 20,
+                        width: 20,
+                        height: 20,
                         child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.orangeAccent),
+                            strokeWidth: 2, color: Colors.orangeAccent),
                       ),
               ),
             ),
@@ -585,8 +592,8 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
           subtitle: Text("ID: $studentId",
               style: const TextStyle(color: Colors.grey)),
-          trailing: const Icon(Icons.check_circle,
-              color: Colors.green, size: 20),
+          trailing:
+              const Icon(Icons.check_circle, color: Colors.green, size: 20),
         );
       },
     );

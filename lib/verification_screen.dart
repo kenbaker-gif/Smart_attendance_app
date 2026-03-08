@@ -32,7 +32,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   void initState() {
     super.initState();
     _initCamera(_selectedCameraIndex);
-    _fetchAdminStatus(); // ✅ Check admin role on load
+    _fetchAdminStatus();
   }
 
   // ✅ Fetch admin status once when screen loads
@@ -126,11 +126,16 @@ class _VerificationScreenState extends State<VerificationScreen> {
       await _controller!.pausePreview();
       File fileToSend = await compressFile(File(image.path));
 
-      // ✅ InsightFace verification endpoint
+      // ✅ Get Supabase session token
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
+
+      // ✅ InsightFace verification endpoint with auth
       var request = http.MultipartRequest(
         'POST',
         Uri.parse('https://smartattendancemvp-production.up.railway.app/verify'),
       );
+      request.headers['Authorization'] = 'Bearer $token';
       request.files.add(await http.MultipartFile.fromPath('file', fileToSend.path));
 
       var response = await http.Response.fromStream(
@@ -142,6 +147,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
       if (response.statusCode == 200) {
         var json = jsonDecode(response.body);
         if (mounted) setState(() => _result = json);
+      } else if (response.statusCode == 401) {
+        _showError("Session expired. Please log in again.");
+        await Supabase.instance.client.auth.signOut();
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
+            (route) => false,
+          );
+        }
       } else {
         _showError("Server Error (${response.statusCode})");
       }
@@ -216,7 +230,6 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 if (_isAdmin)
                   Row(
                     children: [
-                      // Admin Screen button
                       FloatingActionButton.small(
                         heroTag: "btn_admin",
                         backgroundColor: Colors.cyanAccent.withOpacity(0.85),
@@ -224,7 +237,6 @@ class _VerificationScreenState extends State<VerificationScreen> {
                         child: const Icon(Icons.admin_panel_settings, color: Colors.black),
                       ),
                       const SizedBox(width: 10),
-                      // Stats Screen button
                       FloatingActionButton.small(
                         heroTag: "btn_stats",
                         backgroundColor: Colors.cyanAccent.withOpacity(0.85),
@@ -234,7 +246,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     ],
                   ),
 
-                // Camera switch button (always visible if multiple cameras)
+                // Camera switch button
                 if (widget.cameras.length > 1)
                   GestureDetector(
                     onTap: _toggleCamera,
@@ -278,7 +290,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
               ),
             ),
 
-          // 5. BOTTOM UI (BUTTON & STATUS)
+          // 5. BOTTOM UI
           Positioned(
             bottom: 60, left: 0, right: 0,
             child: Column(
