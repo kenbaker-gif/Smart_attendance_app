@@ -195,10 +195,13 @@ class _VerificationScreenState extends State<VerificationScreen> {
       );
     }
 
+    // ✅ Handle all three result states
     bool isMatch = false;
+    bool isSpoof = false;
     String identity = "Unknown";
     if (_result != null) {
       if (_result!['match'] == true || _result!['status'] == 'success') isMatch = true;
+      if (_result!['status'] == 'spoof') isSpoof = true;
       if (_result!['name'] != null) identity = _result!['name'].toString();
     }
 
@@ -264,7 +267,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
             ),
           ),
 
-          // 4. RESULTS DISPLAY
+          // 4. RESULTS DISPLAY — handles success, spoof, and failed
           if (_result != null)
             Positioned(
               top: 120, left: 20, right: 20,
@@ -273,16 +276,28 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 decoration: BoxDecoration(
                   color: Colors.black87,
                   border: Border.all(
-                    color: isMatch ? Colors.greenAccent : Colors.redAccent,
+                    color: isMatch
+                        ? Colors.greenAccent
+                        : isSpoof
+                            ? Colors.orangeAccent
+                            : Colors.redAccent,
                     width: 2,
                   ),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  isMatch ? "MATCH: $identity" : "NO MATCH FOUND",
+                  isMatch
+                      ? "MATCH: $identity"
+                      : isSpoof
+                          ? "⚠️ SPOOF DETECTED"
+                          : "NO MATCH FOUND",
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isMatch ? Colors.greenAccent : Colors.redAccent,
+                    color: isMatch
+                        ? Colors.greenAccent
+                        : isSpoof
+                            ? Colors.orangeAccent
+                            : Colors.redAccent,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),

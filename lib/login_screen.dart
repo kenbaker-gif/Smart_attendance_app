@@ -74,6 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
       final GoogleSignIn googleSignIn = GoogleSignIn(serverClientId: webClientId);
+      await googleSignIn.signOut(); // ✅ force account chooser every time
       final googleUser = await googleSignIn.signIn();
       if (googleUser == null) return;
 
