@@ -28,7 +28,7 @@ class _StatsScreenState extends State<StatsScreen> {
         ),
       )
       // ✅ Your Streamlit dashboard URL
-      ..loadRequest(Uri.parse('https://eloquent-renewal-production.up.railway.app/'));
+      ..loadRequest(Uri.parse('https://faceattend.app/dasboard'));
   }
 
   @override
