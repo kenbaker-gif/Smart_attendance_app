@@ -28,7 +28,7 @@ class _StatsScreenState extends State<StatsScreen> {
         ),
       )
       // ✅ Your Streamlit dashboard URL
-      ..loadRequest(Uri.parse('https://faceattend.app/dasboard'));
+      ..loadRequest(Uri.parse('https://faceattend.app/dashboard'));
   }
 
   @override
