@@ -26,11 +26,9 @@ class _AdminScreenState extends State<AdminScreen> {
   final _nameController = TextEditingController();
   final _idController   = TextEditingController();
 
-  // Institution context — fetched once on load
   String? _institutionId;
   String? _institutionName;
 
-  // 4 image slots
   final List<File?> _capturedImages = [null, null, null, null];
   int _currentStep = 0;
 
@@ -38,9 +36,10 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Map<String, dynamic>> _students = [];
   bool _isLoading = true;
 
-  // ✅ Fixed: updated to correct active Railway service
-  final String registrationUrl =
-      "https://dazzling-intuition-production-297b.up.railway.app/upload-student-face";
+  final String _baseUrl =
+      "https://dazzling-intuition-production-297b.up.railway.app";
+
+  String get registrationUrl => "$_baseUrl/upload-student-face";
 
   @override
   void initState() {
@@ -89,7 +88,7 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  // ── Load students scoped to this institution ───────────────────────────
+  // ── Load students ──────────────────────────────────────────────────────
   Future<void> _loadStudents() async {
     try {
       final data = _institutionId != null
@@ -113,12 +112,75 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  // ── Signed URL for private bucket ─────────────────────────────────────
+  // ── Delete student ─────────────────────────────────────────────────────
+  Future<void> _deleteStudent(String studentId, String studentName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0f0f1c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Delete Student",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          "Are you sure you want to delete $studentName?\nThis will remove all their photos and attendance records permanently.",
+          style: const TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final session = Supabase.instance.client.auth.currentSession;
+    final token   = session?.accessToken ?? '';
+
+    try {
+      final response = await http.delete(
+        Uri.parse("$_baseUrl/students/$studentId"),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("✅ $studentName deleted successfully."),
+              backgroundColor: Colors.green,
+            ),
+          );
+          await _loadStudents();
+        }
+      } else {
+        final body = jsonDecode(response.body);
+        throw Exception(body['detail'] ?? 'Delete failed');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ Failed to delete: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ── Signed URL ─────────────────────────────────────────────────────────
   Future<String?> _getSignedUrl(String filePath) async {
     try {
       final response = await Supabase.instance.client.storage
           .from('raw_faces')
-          .createSignedUrl(filePath, 60 * 60); // 1 hour expiry
+          .createSignedUrl(filePath, 60 * 60);
       return response;
     } catch (e) {
       debugPrint("Signed URL error: $e");
@@ -173,7 +235,6 @@ class _AdminScreenState extends State<AdminScreen> {
 
     setState(() => _isUploading = true);
 
-    // ✅ Get Supabase session token once before the loop
     final session = Supabase.instance.client.auth.currentSession;
     final token   = session?.accessToken ?? '';
 
@@ -186,10 +247,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
       try {
         var request = http.MultipartRequest('POST', Uri.parse(registrationUrl));
-
-        // ✅ Auth header
         request.headers['Authorization'] = 'Bearer $token';
-
         request.files.add(await http.MultipartFile.fromPath(
           'file',
           file.path,
@@ -333,7 +391,6 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
           const SizedBox(height: 16),
 
-          // Progress bar
           Row(
             children: List.generate(4, (i) {
               final done   = _capturedImages[i] != null;
@@ -359,7 +416,6 @@ class _AdminScreenState extends State<AdminScreen> {
               style: const TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 20),
 
-          // 4 capture tiles
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -551,7 +607,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  // ── Student list with signed URLs ──────────────────────────────────────
+  // ── Student list ───────────────────────────────────────────────────────
   Widget _buildStudentList() {
     if (_isLoading)
       return const Center(
@@ -566,10 +622,11 @@ class _AdminScreenState extends State<AdminScreen> {
       itemCount: _students.length,
       separatorBuilder: (_, __) => const Divider(color: Colors.grey),
       itemBuilder: (context, index) {
-        final student   = _students[index];
-        final studentId = student['id'].toString();
-        final instId    = student['institution_id']?.toString() ?? _institutionId ?? 'NKU';
-        final filePath  = '$instId/$studentId/1.jpg';
+        final student     = _students[index];
+        final studentId   = student['id'].toString();
+        final studentName = student['name']?.toString() ?? 'Unknown';
+        final instId      = student['institution_id']?.toString() ?? _institutionId ?? 'NKU';
+        final filePath    = '$instId/$studentId/1.jpg';
 
         return FutureBuilder<String?>(
           future: _getSignedUrl(filePath),
@@ -602,14 +659,18 @@ class _AdminScreenState extends State<AdminScreen> {
                 ),
               ),
               title: Text(
-                student['name'] ?? "No Name",
+                studentName,
                 style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold),
               ),
               subtitle: Text("ID: $studentId",
                   style: const TextStyle(color: Colors.grey)),
-              trailing: const Icon(Icons.check_circle,
-                  color: Colors.green, size: 20),
+              // ✅ Delete button replaces the green checkmark
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+                tooltip: "Delete student",
+                onPressed: () => _deleteStudent(studentId, studentName),
+              ),
             );
           },
         );

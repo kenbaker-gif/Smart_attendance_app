@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:camera/camera.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+// import 'package:google_sign_in/google_sign_in.dart';
 import 'signup_screen.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+// import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class LoginScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -20,7 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final LocalAuthentication _auth = LocalAuthentication();
 
   bool _isLoading        = false;
-  bool _isGoogleLoading  = false;
+  // bool _isGoogleLoading  = false;
   bool _obscurePassword  = true;
   bool _hasSession       = false;
 
@@ -69,37 +69,38 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _googleSignIn() async {
-    setState(() => _isGoogleLoading = true);
-    try {
-      final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
-      final GoogleSignIn googleSignIn = GoogleSignIn(serverClientId: webClientId);
-      await googleSignIn.signOut(); // ✅ force account chooser every time
-      final googleUser = await googleSignIn.signIn();
-      if (googleUser == null) return;
-
-      final googleAuth = await googleUser.authentication;
-      final accessToken = googleAuth.accessToken;
-      final idToken     = googleAuth.idToken;
-
-      if (accessToken == null || idToken == null) {
-        _showSnack("Google sign in failed.", isError: true);
-        return;
-      }
-
-      await Supabase.instance.client.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: idToken,
-        accessToken: accessToken,
-      );
-
-      if (mounted) _navigateAfterLogin();
-    } catch (e) {
-      if (mounted) _showSnack("Google sign in failed.", isError: true);
-    } finally {
-      if (mounted) setState(() => _isGoogleLoading = false);
-    }
-  }
+  // ── Google Sign In (commented out — pending fix) ───────────────────────
+  // Future<void> _googleSignIn() async {
+  //   setState(() => _isGoogleLoading = true);
+  //   try {
+  //     final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
+  //     final GoogleSignIn googleSignIn = GoogleSignIn(serverClientId: webClientId);
+  //     await googleSignIn.signOut();
+  //     final googleUser = await googleSignIn.signIn();
+  //     if (googleUser == null) return;
+  //
+  //     final googleAuth  = await googleUser.authentication;
+  //     final accessToken = googleAuth.accessToken;
+  //     final idToken     = googleAuth.idToken;
+  //
+  //     if (accessToken == null || idToken == null) {
+  //       _showSnack("Google sign in failed.", isError: true);
+  //       return;
+  //     }
+  //
+  //     await Supabase.instance.client.auth.signInWithIdToken(
+  //       provider: OAuthProvider.google,
+  //       idToken: idToken,
+  //       accessToken: accessToken,
+  //     );
+  //
+  //     if (mounted) _navigateAfterLogin();
+  //   } catch (e) {
+  //     if (mounted) _showSnack("Google sign in failed.", isError: true);
+  //   } finally {
+  //     if (mounted) setState(() => _isGoogleLoading = false);
+  //   }
+  // }
 
   void _navigateAfterLogin() {
     if (!mounted) return;
@@ -211,46 +212,46 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
 
-                    // Divider
-                    const SizedBox(height: 28),
-                    const Row(children: [
-                      Expanded(child: Divider(color: Colors.grey)),
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: Text("OR", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                      ),
-                      Expanded(child: Divider(color: Colors.grey)),
-                    ]),
-                    const SizedBox(height: 20),
+                    // ── Google Sign In (commented out — pending fix) ──────
+                    // const SizedBox(height: 28),
+                    // const Row(children: [
+                    //   Expanded(child: Divider(color: Colors.grey)),
+                    //   Padding(
+                    //     padding: EdgeInsets.symmetric(horizontal: 12),
+                    //     child: Text("OR", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    //   ),
+                    //   Expanded(child: Divider(color: Colors.grey)),
+                    // ]),
+                    // const SizedBox(height: 20),
+                    // _isGoogleLoading
+                    //     ? const CircularProgressIndicator(color: Colors.white)
+                    //     : OutlinedButton(
+                    //         style: OutlinedButton.styleFrom(
+                    //           foregroundColor: Colors.white,
+                    //           side: const BorderSide(color: Colors.grey),
+                    //           minimumSize: const Size(double.infinity, 52),
+                    //           shape: RoundedRectangleBorder(
+                    //               borderRadius: BorderRadius.circular(10)),
+                    //         ),
+                    //         onPressed: _googleSignIn,
+                    //         child: Row(
+                    //           mainAxisAlignment: MainAxisAlignment.center,
+                    //           children: [
+                    //             Image.network(
+                    //               'https://www.google.com/favicon.ico',
+                    //               width: 20, height: 20,
+                    //               errorBuilder: (_, __, ___) =>
+                    //                   const Icon(Icons.g_mobiledata, color: Colors.white),
+                    //             ),
+                    //             const SizedBox(width: 10),
+                    //             const Text("Continue with Google",
+                    //                 style: TextStyle(fontWeight: FontWeight.w500)),
+                    //           ],
+                    //         ),
+                    //       ),
+                    // const SizedBox(height: 12),
 
-                    // Google Sign In
-                    _isGoogleLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.grey),
-                              minimumSize: const Size(double.infinity, 52),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                            ),
-                            onPressed: _googleSignIn,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Image.network(
-                                  'https://www.google.com/favicon.ico',
-                                  width: 20, height: 20,
-                                  errorBuilder: (_, __, ___) =>
-                                      const Icon(Icons.g_mobiledata, color: Colors.white),
-                                ),
-                                const SizedBox(width: 10),
-                                const Text("Continue with Google",
-                                    style: TextStyle(fontWeight: FontWeight.w500)),
-                              ],
-                            ),
-                          ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 28),
 
                     // Register university
                     OutlinedButton.icon(
