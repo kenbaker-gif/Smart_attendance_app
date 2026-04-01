@@ -56,3 +56,4 @@ app.*.map.json
 
 #  Secrets
 .env
+/build/test

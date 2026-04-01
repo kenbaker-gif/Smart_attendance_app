@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_screen.dart';
+import 'config.dart';
 
 class VerificationScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -133,7 +134,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
       // ✅ InsightFace verification endpoint with auth
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('https://smartattendancemvp-production.up.railway.app/verify'),
+        Uri.parse(AppConfig.faceVerifyUrl),
       );
       request.headers['Authorization'] = 'Bearer $token';
       request.files.add(await http.MultipartFile.fromPath('file', fileToSend.path));
@@ -148,13 +149,17 @@ class _VerificationScreenState extends State<VerificationScreen> {
         var json = jsonDecode(response.body);
         if (mounted) setState(() => _result = json);
       } else if (response.statusCode == 401) {
-        _showError("Session expired. Please log in again.");
-        await Supabase.instance.client.auth.signOut();
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
-            (route) => false,
-          );
+        _showError("Session expired. Trying to refresh session...");
+        final refreshed = await _tryRefreshSession();
+        if (!refreshed) {
+          _showError("Session could not be refreshed. Please log in again.");
+          await Supabase.instance.client.auth.signOut();
+          if (mounted) {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
+              (route) => false,
+            );
+          }
         }
       } else {
         _showError("Server Error (${response.statusCode})");
@@ -170,6 +175,22 @@ class _VerificationScreenState extends State<VerificationScreen> {
           _serverWakingUp = false;
         });
       }
+    }
+  }
+
+  Future<bool> _tryRefreshSession() async {
+    try {
+      final result = await Supabase.instance.client.auth.refreshSession();
+      // supabase_flutter may return an AuthResponse containing error
+      if (result != null) {
+        final error = (result as dynamic).error;
+        if (error != null) return false;
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Refresh session failed: $e');
+      return false;
     }
   }
 

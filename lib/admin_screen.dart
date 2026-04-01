@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
+import 'config.dart';
 
 // ── 4 capture steps ────────────────────────────────────────────────────────
 const List<Map<String, dynamic>> _captureSteps = [
@@ -36,8 +37,7 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Map<String, dynamic>> _students = [];
   bool _isLoading = true;
 
-  final String _baseUrl =
-      "https://dazzling-intuition-production-297b.up.railway.app";
+  final String _baseUrl = AppConfig.adminBaseUrl;
 
   String get registrationUrl => "$_baseUrl/upload-student-face";
 

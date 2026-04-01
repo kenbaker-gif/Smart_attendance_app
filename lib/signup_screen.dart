@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'login_screen.dart';
 import 'package:camera/camera.dart';
+import 'config.dart';
 
 class SignupScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -26,8 +27,7 @@ class _SignupScreenState extends State<SignupScreen> {
   String? _institutionId;
   String? _errorMessage;
 
-  final String _apiUrl =
-      "https://dazzling-intuition-production-297b.up.railway.app/register-institution";
+  final String _apiUrl = AppConfig.registerInstitutionUrl;
 
   Future<void> _pickLogo() async {
     final picker = ImagePicker();
@@ -46,6 +46,12 @@ class _SignupScreenState extends State<SignupScreen> {
 
     if (uniName.isEmpty || adminName.isEmpty || email.isEmpty || phone.isEmpty) {
       setState(() => _errorMessage = "Please fill in all required fields.");
+      return;
+    }
+
+    final emailRegex = RegExp(r"^[^@\s]+@[^@\s]+\.[^@\s]+");
+    if (!emailRegex.hasMatch(email)) {
+      setState(() => _errorMessage = "Please enter a valid email address.");
       return;
     }
 
@@ -127,7 +133,7 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
             const SizedBox(height: 28),
             const Text(
-              "Registration Successful!",
+              "Registration complete. Please verify your email.",
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 22,

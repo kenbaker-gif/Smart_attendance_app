@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'config.dart';
 
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
@@ -44,7 +45,7 @@ class _StatsScreenState extends State<StatsScreen> {
           },
         ),
       )
-      ..loadRequest(Uri.parse('https://faceattend.app/dashboard'));
+      ..loadRequest(Uri.parse(AppConfig.dashboardUrl));
   }
 
   @override
