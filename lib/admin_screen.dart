@@ -29,6 +29,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   String? _institutionId;
   String? _institutionName;
+  bool _isSuperAdmin = false;
 
   final List<File?> _capturedImages = [null, null, null, null];
   int _currentStep = 0;
@@ -55,70 +56,42 @@ class _AdminScreenState extends State<AdminScreen> {
 
     final result = await Supabase.instance.client
         .from('profiles')
-        .select('role, institution_id, institutions(name)')
-        .eq('id', user.id)
-        .limit(1);
-
-    final data = result.isNotEmpty ? result.first : null;
-    final role = data?['role'] as String?;
-
-    // Allow both admin and super_admin
-    if (data == null || (role != 'admin' && role != 'super_admin')) {
-      _kickOut();
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        _institutionId   = data['institution_id'];
-        _institutionName = data['institutions']?['name'] ?? _institutionId;
-      });
-    }
-
-    await _loadStudents();
-  } catch (e) {
-    _kickOut();
-  }
-}
-
-  void _kickOut() {
-    if (mounted) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Unauthorized Access"), backgroundColor: Colors.red),
-      );
-    }
-  }
-
-  // ── Load students ──────────────────────────────────────────────────────
-  Future<void> _checkAccess() async {
-  try {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) { _kickOut(); return; }
-
-    final result = await Supabase.instance.client
-        .from('profiles')
-        .select('role, is_admin, is_super_admin, institution_id, institutions(name, status)')
+        .select('role, is_admin, is_super_admin, institution_id')
         .eq('id', user.id)
         .limit(1);
 
     final data = result.isNotEmpty ? result.first : null;
     if (data == null) { _kickOut(); return; }
 
-    final role        = data['role'] as String?;
+    final role         = data['role'] as String?;
     final isAdmin      = data['is_admin'] == true;
     final isSuperAdmin = data['is_super_admin'] == true;
 
-    // Accept either role string OR boolean flag (handles old + new profiles)
     final hasAccess = isSuperAdmin || isAdmin ||
                       role == 'admin' || role == 'super_admin';
 
     if (!hasAccess) { _kickOut(); return; }
 
+    // Fetch institution separately only if institution_id exists
+    String? instName;
+    String? instStatus;
+    final instId = data['institution_id'] as String?;
+
+    if (instId != null) {
+      final instResult = await Supabase.instance.client
+          .from('institutions')
+          .select('name, status')
+          .eq('id', instId)
+          .limit(1);
+
+      if (instResult.isNotEmpty) {
+        instName   = instResult.first['name'] as String?;
+        instStatus = instResult.first['status'] as String?;
+      }
+    }
+
     // Check institution status (skip for super admins)
     if (!isSuperAdmin && role != 'super_admin') {
-      final instStatus = data['institutions']?['status'] as String?;
       if (instStatus == 'suspended') {
         _kickOutWithMessage("Your institution has been suspended. Contact support.");
         return;
@@ -131,13 +104,15 @@ class _AdminScreenState extends State<AdminScreen> {
 
     if (mounted) {
       setState(() {
-        _institutionId   = data['institution_id'];
-        _institutionName = data['institutions']?['name'] ?? _institutionId;
+        _isSuperAdmin    = isSuperAdmin || role == 'super_admin';
+        _institutionId   = instId;
+        _institutionName = instName ?? instId;
       });
     }
 
     await _loadStudents();
   } catch (e) {
+    debugPrint("❌ _checkAccess error: $e");
     _kickOut();
   }
 }
@@ -152,6 +127,31 @@ void _kickOutWithMessage(String message) {
 }
 
 void _kickOut() => _kickOutWithMessage("Unauthorized Access");
+
+  // ── Load students ──────────────────────────────────────────────────────
+Future<void> _loadStudents() async {
+  setState(() => _isLoading = true);
+  try {
+    var query = Supabase.instance.client
+        .from('students')  // ← was 'profiles'
+        .select('id, name, institution_id');
+
+    final data = _isSuperAdmin
+        ? await query
+        : await query.eq('institution_id', _institutionId ?? '');
+
+    if (mounted) {
+      setState(() {
+        _students = List<Map<String, dynamic>>.from(data);
+      });
+    }
+  } catch (e) {
+    debugPrint("Load students error: $e");
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
+  }
+}
+
   // ── Delete student ─────────────────────────────────────────────────────
   Future<void> _deleteStudent(String studentId, String studentName) async {
     final confirmed = await showDialog<bool>(
@@ -705,7 +705,6 @@ void _kickOut() => _kickOutWithMessage("Unauthorized Access");
               ),
               subtitle: Text("ID: $studentId",
                   style: const TextStyle(color: Colors.grey)),
-              // ✅ Delete button replaces the green checkmark
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
                 tooltip: "Delete student",

@@ -20,7 +20,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final LocalAuthentication _auth = LocalAuthentication();
 
   bool _isLoading        = false;
-  // bool _isGoogleLoading  = false;
   bool _obscurePassword  = true;
   bool _hasSession       = false;
 
@@ -37,13 +36,93 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  // ── Check institution status after auth ───────────────────────────────
+  /// Returns null if the institution is active (or user has no institution).
+  /// Returns an error message string if suspended/pending.
+  Future<String?> _checkInstitutionStatus(String userId) async {
+    try {
+      final profileRes = await Supabase.instance.client
+          .from('profiles')
+          .select('institution_id, is_super_admin')
+          .eq('id', userId)
+          .limit(1);
+
+      debugPrint('[StatusCheck] profileRes: $profileRes');
+
+      if (profileRes.isEmpty) {
+        debugPrint('[StatusCheck] No profile found — allowing login');
+        return null;
+      }
+
+      final isSuperAdmin = profileRes[0]['is_super_admin'];
+      debugPrint('[StatusCheck] is_super_admin: $isSuperAdmin');
+
+      if (isSuperAdmin == true) {
+        debugPrint('[StatusCheck] Super admin — bypassing status check');
+        return null;
+      }
+
+      final institutionId = profileRes[0]['institution_id'];
+      debugPrint('[StatusCheck] institution_id: $institutionId');
+
+      if (institutionId == null) {
+        debugPrint('[StatusCheck] No institution_id — allowing login');
+        return null;
+      }
+
+      final institutionRes = await Supabase.instance.client
+          .from('institutions')
+          .select('status')
+          .eq('id', institutionId)
+          .limit(1);
+
+      debugPrint('[StatusCheck] institutionRes: $institutionRes');
+
+      if (institutionRes.isEmpty) {
+        debugPrint('[StatusCheck] Institution not found — allowing login');
+        return null;
+      }
+
+      final status = institutionRes[0]['status']?.toString().toLowerCase().trim();
+      debugPrint('[StatusCheck] status: "$status"');
+
+      if (status == 'suspended') {
+        return 'Your institution has been suspended. Contact support.';
+      }
+      if (status == 'pending') {
+        return 'Your institution is pending approval.';
+      }
+
+      debugPrint('[StatusCheck] Status is active — allowing login');
+      return null;
+    } catch (e, stack) {
+      debugPrint('[StatusCheck] Error: $e');
+      debugPrint('[StatusCheck] Stack: $stack');
+      return null;
+    }
+  }
+
   Future<void> _authenticate() async {
     try {
       final authenticated = await _auth.authenticate(
         localizedReason: 'Scan fingerprint to unlock',
         options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
-      if (authenticated && mounted) _navigateAfterLogin();
+      if (!authenticated || !mounted) return;
+
+      // Check status even for biometric login
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId != null) {
+        final error = await _checkInstitutionStatus(userId);
+        if (error != null) {
+          await Supabase.instance.client.auth.signOut();
+          if (mounted) _showSnack(error, isError: true);
+          if (mounted) setState(() => _hasSession = false);
+          return;
+        }
+      }
+
+      if (mounted) _navigateAfterLogin();
     } catch (e) {
       debugPrint('Biometric error: $e');
     }
@@ -57,50 +136,32 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => _isLoading = true);
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
+      // 1. Supabase auth
+      final res = await Supabase.instance.client.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+
+      // 2. Check institution status
+      final userId = res.user?.id;
+      if (userId != null) {
+        final error = await _checkInstitutionStatus(userId);
+        if (error != null) {
+          await Supabase.instance.client.auth.signOut(); // kill the session
+          if (mounted) _showSnack(error, isError: true);
+          return;
+        }
+      }
+
       if (mounted) _navigateAfterLogin();
     } on AuthException catch (e) {
       if (mounted) _showSnack(e.message, isError: true);
+    } catch (e) {
+      if (mounted) _showSnack("Login failed. Please try again.", isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // ── Google Sign In (commented out — pending fix) ───────────────────────
-  // Future<void> _googleSignIn() async {
-  //   setState(() => _isGoogleLoading = true);
-  //   try {
-  //     final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
-  //     final GoogleSignIn googleSignIn = GoogleSignIn(serverClientId: webClientId);
-  //     await googleSignIn.signOut();
-  //     final googleUser = await googleSignIn.signIn();
-  //     if (googleUser == null) return;
-  //
-  //     final googleAuth  = await googleUser.authentication;
-  //     final accessToken = googleAuth.accessToken;
-  //     final idToken     = googleAuth.idToken;
-  //
-  //     if (accessToken == null || idToken == null) {
-  //       _showSnack("Google sign in failed.", isError: true);
-  //       return;
-  //     }
-  //
-  //     await Supabase.instance.client.auth.signInWithIdToken(
-  //       provider: OAuthProvider.google,
-  //       idToken: idToken,
-  //       accessToken: accessToken,
-  //     );
-  //
-  //     if (mounted) _navigateAfterLogin();
-  //   } catch (e) {
-  //     if (mounted) _showSnack("Google sign in failed.", isError: true);
-  //   } finally {
-  //     if (mounted) setState(() => _isGoogleLoading = false);
-  //   }
-  // }
 
   void _navigateAfterLogin() {
     if (!mounted) return;
@@ -211,45 +272,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         label: const Text("USE FINGERPRINT"),
                       ),
                     ],
-
-                    // ── Google Sign In (commented out — pending fix) ──────
-                    // const SizedBox(height: 28),
-                    // const Row(children: [
-                    //   Expanded(child: Divider(color: Colors.grey)),
-                    //   Padding(
-                    //     padding: EdgeInsets.symmetric(horizontal: 12),
-                    //     child: Text("OR", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    //   ),
-                    //   Expanded(child: Divider(color: Colors.grey)),
-                    // ]),
-                    // const SizedBox(height: 20),
-                    // _isGoogleLoading
-                    //     ? const CircularProgressIndicator(color: Colors.white)
-                    //     : OutlinedButton(
-                    //         style: OutlinedButton.styleFrom(
-                    //           foregroundColor: Colors.white,
-                    //           side: const BorderSide(color: Colors.grey),
-                    //           minimumSize: const Size(double.infinity, 52),
-                    //           shape: RoundedRectangleBorder(
-                    //               borderRadius: BorderRadius.circular(10)),
-                    //         ),
-                    //         onPressed: _googleSignIn,
-                    //         child: Row(
-                    //           mainAxisAlignment: MainAxisAlignment.center,
-                    //           children: [
-                    //             Image.network(
-                    //               'https://www.google.com/favicon.ico',
-                    //               width: 20, height: 20,
-                    //               errorBuilder: (_, __, ___) =>
-                    //                   const Icon(Icons.g_mobiledata, color: Colors.white),
-                    //             ),
-                    //             const SizedBox(width: 10),
-                    //             const Text("Continue with Google",
-                    //                 style: TextStyle(fontWeight: FontWeight.w500)),
-                    //           ],
-                    //         ),
-                    //       ),
-                    // const SizedBox(height: 12),
 
                     const SizedBox(height: 28),
 
