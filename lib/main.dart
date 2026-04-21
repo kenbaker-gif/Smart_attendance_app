@@ -61,10 +61,7 @@ class AttendanceApp extends StatelessWidget {
       routes: {
         '/login': (context) => LoginScreen(cameras: cameras),
         '/home': (context) => SecurityWrapper(
-              child: TrialGate(
-                cameras: cameras,
-                child: VerificationScreen(cameras: cameras),
-              ),
+              child: _HomeBuilder(cameras: cameras),
             ),
         '/admin': (context) => SecurityWrapper(
               isAdminRoute: true,
@@ -81,6 +78,72 @@ class AttendanceApp extends StatelessWidget {
               ),
             ),
       },
+    );
+  }
+}
+
+// ── Home Builder ───────────────────────────────────────────────────────────
+
+class _HomeBuilder extends StatefulWidget {
+  final List<CameraDescription> cameras;
+  const _HomeBuilder({required this.cameras});
+
+  @override
+  State<_HomeBuilder> createState() => _HomeBuilderState();
+}
+
+class _HomeBuilderState extends State<_HomeBuilder> {
+  String _institutionId = '';
+  String? _courseUnitId;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInstitutionId();
+  }
+
+  Future<void> _loadInstitutionId() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        setState(() => _loading = false);
+        return;
+      }
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('institution_id, course_unit_id')
+          .eq('id', user.id)
+          .limit(1)
+          .single();
+      if (mounted) {
+        setState(() {
+          _institutionId = profile['institution_id'] as String? ?? '';
+          _courseUnitId = profile['course_unit_id'] as String?;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('_HomeBuilder: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent)),
+      );
+    }
+    return TrialGate(
+      cameras: widget.cameras,
+      child: VerificationScreen(
+        cameras: widget.cameras,
+        institutionId: _institutionId,
+        courseUnitId: _courseUnitId,
+      ),
     );
   }
 }
@@ -118,7 +181,6 @@ class _TrialGateState extends State<TrialGate> {
         return;
       }
 
-      // Get institution_id from profiles
       final profile = await Supabase.instance.client
           .from('profiles')
           .select('institution_id')
@@ -151,7 +213,6 @@ class _TrialGateState extends State<TrialGate> {
           _loading = false;
         });
       } else {
-        // If check fails, allow access — don't block on network errors
         setState(() => _loading = false);
       }
     } catch (e) {
@@ -177,7 +238,6 @@ class _TrialGateState extends State<TrialGate> {
           : _TrialExpiredScreen(reason: _reason);
     }
 
-    // Show days left banner if trial has <= 7 days
     if (_daysLeft != null && _daysLeft! <= 7) {
       return Column(
         children: [

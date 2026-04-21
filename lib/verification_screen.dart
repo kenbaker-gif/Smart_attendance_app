@@ -11,7 +11,9 @@ import 'config.dart';
 
 class VerificationScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  const VerificationScreen({super.key, required this.cameras});
+  final String institutionId;
+  final String? courseUnitId;
+  const VerificationScreen({super.key, required this.cameras, required this.institutionId, this.courseUnitId,});
 
   @override
   State<VerificationScreen> createState() => _VerificationScreenState();
@@ -137,6 +139,10 @@ class _VerificationScreenState extends State<VerificationScreen> {
         Uri.parse(AppConfig.faceVerifyUrl),
       );
       request.headers['Authorization'] = 'Bearer $token';
+      // ✅ Send institution_id so spoof/failed records are institution-scoped
+      request.fields['institution_id'] = widget.institutionId;
+      if (widget.courseUnitId != null)
+        request.fields['course_unit_id'] = widget.courseUnitId!;
       request.files.add(await http.MultipartFile.fromPath('file', fileToSend.path));
 
       var response = await http.Response.fromStream(
@@ -181,13 +187,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Future<bool> _tryRefreshSession() async {
     try {
       final result = await Supabase.instance.client.auth.refreshSession();
-      // supabase_flutter may return an AuthResponse containing error
-      if (result != null) {
-        final error = (result as dynamic).error;
-        if (error != null) return false;
-        return true;
-      }
-      return false;
+      return result.session != null;
     } catch (e) {
       debugPrint('Refresh session failed: $e');
       return false;
