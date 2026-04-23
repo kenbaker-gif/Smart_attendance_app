@@ -94,32 +94,57 @@ class _HomeBuilder extends StatefulWidget {
 
 class _HomeBuilderState extends State<_HomeBuilder> {
   String _institutionId = '';
-  String? _courseUnitId;
+  List<Map<String, dynamic>> _courseUnits = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadInstitutionId();
+    _loadProfile();
   }
 
-  Future<void> _loadInstitutionId() async {
+  Future<void> _loadProfile() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) {
         setState(() => _loading = false);
         return;
       }
+
       final profile = await Supabase.instance.client
           .from('profiles')
           .select('institution_id, course_unit_id')
           .eq('id', user.id)
           .limit(1)
           .single();
+
+      final institutionId = profile['institution_id'] as String? ?? '';
+      final rawUnits = profile['course_unit_id'];
+      final unitIds = rawUnits is List
+          ? rawUnits.map((e) => e.toString()).toList()
+          : <String>[];
+
+      List<Map<String, dynamic>> courseUnits = [];
+
+      if (unitIds.isNotEmpty) {
+        final rows = await Supabase.instance.client
+            .from('course_units')
+            .select('id, name')
+            .inFilter('id', unitIds);
+
+        final nameMap = {
+          for (final row in rows) row['id'] as String: row['name'] as String
+        };
+        courseUnits = unitIds
+            .where((id) => nameMap.containsKey(id))
+            .map((id) => {'id': id, 'name': nameMap[id]!})
+            .toList();
+      }
+
       if (mounted) {
         setState(() {
-          _institutionId = profile['institution_id'] as String? ?? '';
-          _courseUnitId = profile['course_unit_id'] as String?;
+          _institutionId = institutionId;
+          _courseUnits = courseUnits;
           _loading = false;
         });
       }
@@ -142,7 +167,7 @@ class _HomeBuilderState extends State<_HomeBuilder> {
       child: VerificationScreen(
         cameras: widget.cameras,
         institutionId: _institutionId,
-        courseUnitId: _courseUnitId,
+        courseUnits: _courseUnits,
       ),
     );
   }

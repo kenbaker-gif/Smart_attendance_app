@@ -12,8 +12,15 @@ import 'config.dart';
 class VerificationScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   final String institutionId;
-  final String? courseUnitId;
-  const VerificationScreen({super.key, required this.cameras, required this.institutionId, this.courseUnitId,});
+  // Changed: accepts full list of {id, name} maps instead of a single nullable id
+  final List<Map<String, dynamic>> courseUnits;
+
+  const VerificationScreen({
+    super.key,
+    required this.cameras,
+    required this.institutionId,
+    this.courseUnits = const [],
+  });
 
   @override
   State<VerificationScreen> createState() => _VerificationScreenState();
@@ -27,35 +34,37 @@ class _VerificationScreenState extends State<VerificationScreen> {
   bool _serverWakingUp = false;
   int _selectedCameraIndex = 0;
   Map<String, dynamic>? _result;
-
-  // ✅ Admin state
   bool _isAdmin = false;
+
+  // Session-level selected unit — persists across scans until coordinator changes it
+  Map<String, dynamic>? _selectedCourseUnit;
 
   @override
   void initState() {
     super.initState();
     _initCamera(_selectedCameraIndex);
     _fetchAdminStatus();
+
+    // Auto-select if only one unit assigned
+    if (widget.courseUnits.length == 1) {
+      _selectedCourseUnit = widget.courseUnits.first;
+    }
   }
 
-  // ✅ Fetch admin status once when screen loads
   Future<void> _fetchAdminStatus() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
-
     final result = await Supabase.instance.client
         .from('profiles')
         .select('is_admin')
         .eq('id', user.id)
         .limit(1);
     final data = result.isNotEmpty ? result.first : null;
-
     if (mounted) {
       setState(() => _isAdmin = data != null && data['is_admin'] == true);
     }
   }
 
-  // 🔴 HARD LOGOUT
   Future<void> _manualLogout() async {
     await Supabase.instance.client.auth.signOut();
     if (!mounted) return;
@@ -68,13 +77,11 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Future<void> _initCamera(int cameraIndex) async {
     if (widget.cameras.isEmpty) return;
     if (_controller != null) await _controller!.dispose();
-
     _controller = CameraController(
       widget.cameras[cameraIndex],
       ResolutionPreset.medium,
       enableAudio: false,
     );
-
     try {
       await _controller!.initialize();
       if (!mounted) return;
@@ -96,9 +103,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Future<File> compressFile(File file) async {
     final filePath = file.absolute.path;
     final lastIndex = filePath.lastIndexOf(RegExp(r'.jp'));
-    final splitted = filePath.substring(0, (lastIndex));
+    final splitted = filePath.substring(0, lastIndex);
     final outPath = "${splitted}_out.jpg";
-
     var result = await FlutterImageCompress.compressAndGetFile(
       file.absolute.path, outPath,
       quality: 40, minWidth: 400, minHeight: 400,
@@ -106,8 +112,69 @@ class _VerificationScreenState extends State<VerificationScreen> {
     return File(result!.path);
   }
 
+  // Shows bottom sheet and returns selected unit. Returns null if dismissed.
+  Future<Map<String, dynamic>?> _pickCourseUnit() async {
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Which class are you taking attendance for?",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ...widget.courseUnits.map((unit) {
+                return ListTile(
+                  onTap: () => Navigator.of(ctx).pop(unit),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  tileColor: Colors.white.withOpacity(0.05),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  title: Text(
+                    unit['name'] ?? unit['id'],
+                    style: const TextStyle(color: Colors.cyanAccent, fontSize: 15),
+                  ),
+                  trailing: const Icon(Icons.arrow_forward_ios,
+                      color: Colors.white38, size: 14),
+                );
+              }).toList(),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _scanFace() async {
     if (!_isCameraInitialized || _isScanning) return;
+
+    // If multiple units and none selected yet, force a pick first
+    if (widget.courseUnits.length > 1 && _selectedCourseUnit == null) {
+      final picked = await _pickCourseUnit();
+      if (picked == null) return; // dismissed, do nothing
+      setState(() => _selectedCourseUnit = picked);
+    }
+
+    // If no units assigned at all, warn and bail
+    if (widget.courseUnits.isEmpty) {
+      _showError("No course units assigned. Contact your admin.");
+      return;
+    }
 
     setState(() {
       _isScanning = true;
@@ -129,21 +196,23 @@ class _VerificationScreenState extends State<VerificationScreen> {
       await _controller!.pausePreview();
       File fileToSend = await compressFile(File(image.path));
 
-      // ✅ Get Supabase session token
       final session = Supabase.instance.client.auth.currentSession;
       final token = session?.accessToken ?? '';
 
-      // ✅ InsightFace verification endpoint with auth
       var request = http.MultipartRequest(
         'POST',
         Uri.parse(AppConfig.faceVerifyUrl),
       );
       request.headers['Authorization'] = 'Bearer $token';
-      // ✅ Send institution_id so spoof/failed records are institution-scoped
       request.fields['institution_id'] = widget.institutionId;
-      if (widget.courseUnitId != null)
-        request.fields['course_unit_id'] = widget.courseUnitId!;
-      request.files.add(await http.MultipartFile.fromPath('file', fileToSend.path));
+
+      // Always send the explicitly selected unit — no more relying on server cu[0]
+      if (_selectedCourseUnit != null) {
+        request.fields['course_unit_id'] = _selectedCourseUnit!['id'];
+      }
+
+      request.files.add(
+          await http.MultipartFile.fromPath('file', fileToSend.path));
 
       var response = await http.Response.fromStream(
         await request.send().timeout(const Duration(seconds: 25)),
@@ -162,7 +231,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
           await Supabase.instance.client.auth.signOut();
           if (mounted) {
             Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
+              MaterialPageRoute(
+                  builder: (_) => LoginScreen(cameras: widget.cameras)),
               (route) => false,
             );
           }
@@ -212,16 +282,17 @@ class _VerificationScreenState extends State<VerificationScreen> {
     if (!_isCameraInitialized) {
       return const Scaffold(
         backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent)),
+        body: Center(
+            child: CircularProgressIndicator(color: Colors.cyanAccent)),
       );
     }
 
-    // ✅ Handle all three result states
     bool isMatch = false;
     bool isSpoof = false;
     String identity = "Unknown";
     if (_result != null) {
-      if (_result!['match'] == true || _result!['status'] == 'success') isMatch = true;
+      if (_result!['match'] == true || _result!['status'] == 'success')
+        isMatch = true;
       if (_result!['status'] == 'spoof') isSpoof = true;
       if (_result!['name'] != null) identity = _result!['name'].toString();
     }
@@ -242,35 +313,33 @@ class _VerificationScreenState extends State<VerificationScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Logout button (always visible)
                 FloatingActionButton.small(
                   heroTag: "btn_logout",
                   backgroundColor: Colors.red.withOpacity(0.8),
                   onPressed: _manualLogout,
                   child: const Icon(Icons.logout, color: Colors.white),
                 ),
-
-                // ✅ Admin buttons — only shown if user is admin
                 if (_isAdmin)
                   Row(
                     children: [
                       FloatingActionButton.small(
                         heroTag: "btn_admin",
                         backgroundColor: Colors.cyanAccent.withOpacity(0.85),
-                        onPressed: () => Navigator.of(context).pushNamed('/admin'),
-                        child: const Icon(Icons.admin_panel_settings, color: Colors.black),
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed('/admin'),
+                        child: const Icon(Icons.admin_panel_settings,
+                            color: Colors.black),
                       ),
                       const SizedBox(width: 10),
                       FloatingActionButton.small(
                         heroTag: "btn_stats",
                         backgroundColor: Colors.cyanAccent.withOpacity(0.85),
-                        onPressed: () => Navigator.of(context).pushNamed('/stats'),
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed('/stats'),
                         child: const Icon(Icons.bar_chart, color: Colors.black),
                       ),
                     ],
                   ),
-
-                // Camera switch button
                 if (widget.cameras.length > 1)
                   GestureDetector(
                     onTap: _toggleCamera,
@@ -288,10 +357,58 @@ class _VerificationScreenState extends State<VerificationScreen> {
             ),
           ),
 
-          // 4. RESULTS DISPLAY — handles success, spoof, and failed
+          // 4. ACTIVE CLASS CHIP — shown when a unit is selected and multiple exist
+          if (_selectedCourseUnit != null && widget.courseUnits.length > 1)
+            Positioned(
+              top: 110, left: 0, right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () async {
+                    final picked = await _pickCourseUnit();
+                    if (picked != null) {
+                      setState(() => _selectedCourseUnit = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.cyanAccent.withOpacity(0.15),
+                      border: Border.all(color: Colors.cyanAccent, width: 1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.class_outlined,
+                            color: Colors.cyanAccent, size: 14),
+                        const SizedBox(width: 6),
+                        Text(
+                          _selectedCourseUnit!['name'] ??
+                              _selectedCourseUnit!['id'],
+                          style: const TextStyle(
+                            color: Colors.cyanAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.swap_horiz,
+                            color: Colors.cyanAccent, size: 14),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // 5. RESULTS DISPLAY
           if (_result != null)
             Positioned(
-              top: 120, left: 20, right: 20,
+              top: _selectedCourseUnit != null && widget.courseUnits.length > 1
+                  ? 150
+                  : 120,
+              left: 20, right: 20,
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -326,7 +443,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
               ),
             ),
 
-          // 5. BOTTOM UI
+          // 6. BOTTOM UI
           Positioned(
             bottom: 60, left: 0, right: 0,
             child: Column(
@@ -346,7 +463,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 Text(
                   _isScanning ? "ANALYZING BIOMETRICS..." : "READY TO SCAN",
                   style: const TextStyle(
-                    color: Colors.white38, fontSize: 10, letterSpacing: 2,
+                    color: Colors.white38,
+                    fontSize: 10,
+                    letterSpacing: 2,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -356,7 +475,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     height: 85, width: 85,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.cyanAccent, width: 3),
+                      border:
+                          Border.all(color: Colors.cyanAccent, width: 3),
                       boxShadow: [
                         if (_isScanning)
                           BoxShadow(
@@ -367,7 +487,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     ),
                     child: Center(
                       child: _isScanning
-                          ? const CircularProgressIndicator(color: Colors.cyanAccent)
+                          ? const CircularProgressIndicator(
+                              color: Colors.cyanAccent)
                           : const Icon(Icons.camera_alt_outlined,
                               color: Colors.cyanAccent, size: 40),
                     ),
@@ -377,7 +498,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
             ),
           ),
 
-          if (_showFlash) Container(color: Colors.white.withOpacity(0.5)),
+          if (_showFlash)
+            Container(color: Colors.white.withOpacity(0.5)),
         ],
       ),
     );
