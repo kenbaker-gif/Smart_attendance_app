@@ -5,6 +5,12 @@ import 'package:camera/camera.dart';
 // import 'package:google_sign_in/google_sign_in.dart';
 import 'signup_screen.dart';
 // import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -37,8 +43,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // ── Check institution status after auth ───────────────────────────────
-  /// Returns null if the institution is active (or user has no institution).
-  /// Returns an error message string if suspended/pending.
   Future<String?> _checkInstitutionStatus(String userId) async {
     try {
       final profileRes = await Supabase.instance.client
@@ -102,6 +106,46 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // ── Audit: log login event to FastAPI ────────────────────────────────
+  Future<void> _logLoginEvent(String jwt) async {
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      final pkgInfo    = await PackageInfo.fromPlatform();
+      String deviceModel = 'Unknown';
+      String osVersion   = 'Unknown';
+
+      if (Platform.isAndroid) {
+        final android = await deviceInfo.androidInfo;
+        deviceModel   = android.model;
+        osVersion     = 'Android ${android.version.release}';
+      } else if (Platform.isIOS) {
+        final ios   = await deviceInfo.iosInfo;
+        deviceModel = ios.utsname.machine;
+        osVersion   = 'iOS ${ios.systemVersion}';
+      }
+
+      final response = await http.post(
+        Uri.parse('https://dazzling-intuition.up.railway.app/auth/log-login'),
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': 'Bearer $jwt',
+        },
+        body: jsonEncode({
+          'device_model': deviceModel,
+          'os_version':   osVersion,
+          'app_version':  '${pkgInfo.version}+${pkgInfo.buildNumber}',
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint('[login] log-login failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      // Never block login on audit failure
+      debugPrint('[login] log-login error: $e');
+    }
+  }
+
   Future<void> _authenticate() async {
     try {
       final authenticated = await _auth.authenticate(
@@ -110,8 +154,9 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       if (!authenticated || !mounted) return;
 
-      // Check status even for biometric login
-      final userId = Supabase.instance.client.auth.currentUser?.id;
+      final session = Supabase.instance.client.auth.currentSession;
+      final userId  = Supabase.instance.client.auth.currentUser?.id;
+
       if (userId != null) {
         final error = await _checkInstitutionStatus(userId);
         if (error != null) {
@@ -120,6 +165,11 @@ class _LoginScreenState extends State<LoginScreen> {
           if (mounted) setState(() => _hasSession = false);
           return;
         }
+      }
+
+      // Log biometric login event
+      if (session != null) {
+        await _logLoginEvent(session.accessToken);
       }
 
       if (mounted) _navigateAfterLogin();
@@ -138,7 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       // 1. Supabase auth
       final res = await Supabase.instance.client.auth.signInWithPassword(
-        email: _emailController.text.trim(),
+        email:    _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
@@ -147,10 +197,15 @@ class _LoginScreenState extends State<LoginScreen> {
       if (userId != null) {
         final error = await _checkInstitutionStatus(userId);
         if (error != null) {
-          await Supabase.instance.client.auth.signOut(); // kill the session
+          await Supabase.instance.client.auth.signOut();
           if (mounted) _showSnack(error, isError: true);
           return;
         }
+      }
+
+      // 3. Log login event (fire and forget — won't block navigation)
+      if (res.session != null) {
+        _logLoginEvent(res.session!.accessToken);
       }
 
       if (mounted) _navigateAfterLogin();
@@ -173,6 +228,13 @@ class _LoginScreenState extends State<LoginScreen> {
       content: Text(msg),
       backgroundColor: isError ? Colors.red : null,
     ));
+  }
+
+  Future<void> _openForgotPassword() async {
+    final uri = Uri.parse('https://faceattend.app/reset-password');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   @override
@@ -238,7 +300,25 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 24),
+
+                    // Forgot password link
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _openForgotPassword,
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.cyanAccent,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Forgot password?',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
 
                     // Login button
                     _isLoading
