@@ -230,11 +230,21 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _openForgotPassword() async {
-    final uri = Uri.parse('https://faceattend.app/reset-password');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+  final uri = Uri.parse('https://faceattend.app/reset-password');
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (e) {
+    debugPrint('[forgot-password] launch error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Could not open browser. Visit faceattend.app/reset-password manually."),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {
