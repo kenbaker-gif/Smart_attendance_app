@@ -65,14 +65,25 @@ class _VerificationScreenState extends State<VerificationScreen> {
     }
   }
 
-  Future<void> _manualLogout() async {
-    await Supabase.instance.client.auth.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
-      (route) => false,
-    );
+Future<void> _manualLogout() async {
+  final session = Supabase.instance.client.auth.currentSession;
+  if (session != null) {
+    try {
+      await http.post(
+        Uri.parse('https://faceattend.app/auth/log-logout'),
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+      );
+    } catch (e) {
+      debugPrint('[logout] log-logout error: $e');
+    }
   }
+  await Supabase.instance.client.auth.signOut();
+  if (!mounted) return;
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => LoginScreen(cameras: widget.cameras)),
+    (route) => false,
+  );
+}
 
   Future<void> _initCamera(int cameraIndex) async {
     if (widget.cameras.isEmpty) return;
@@ -329,14 +340,6 @@ class _VerificationScreenState extends State<VerificationScreen> {
                             Navigator.of(context).pushNamed('/admin'),
                         child: const Icon(Icons.admin_panel_settings,
                             color: Colors.black),
-                      ),
-                      const SizedBox(width: 10),
-                      FloatingActionButton.small(
-                        heroTag: "btn_stats",
-                        backgroundColor: Colors.cyanAccent.withOpacity(0.85),
-                        onPressed: () =>
-                            Navigator.of(context).pushNamed('/stats'),
-                        child: const Icon(Icons.bar_chart, color: Colors.black),
                       ),
                     ],
                   ),
