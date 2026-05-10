@@ -71,7 +71,10 @@ Future<void> _manualLogout() async {
     try {
       await http.post(
         Uri.parse('https://faceattend.app/auth/log-logout'),
-        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
+          'X-Source': 'flutter_app',
+        },
       );
     } catch (e) {
       debugPrint('[logout] log-logout error: $e');
