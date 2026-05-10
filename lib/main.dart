@@ -8,7 +8,6 @@ import 'dart:convert';
 import 'verification_screen.dart';
 import 'login_screen.dart';
 import 'admin_screen.dart';
-import 'stats_screen.dart';
 import 'security_wrapper.dart';
 import 'signup_screen.dart';
 import 'config.dart';
@@ -68,13 +67,6 @@ class AttendanceApp extends StatelessWidget {
               child: TrialGate(
                 cameras: cameras,
                 child: AdminScreen(cameras: cameras),
-              ),
-            ),
-        '/stats': (context) => SecurityWrapper(
-              isAdminRoute: true,
-              child: TrialGate(
-                cameras: cameras,
-                child: const StatsScreen(),
               ),
             ),
       },

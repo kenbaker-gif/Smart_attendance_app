@@ -125,7 +125,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       final response = await http.post(
-        Uri.parse('https://dazzling-intuition.up.railway.app/auth/log-login'),
+        Uri.parse('https://faceattend.app/auth/log-login'),
         headers: {
           'Content-Type':  'application/json',
           'Authorization': 'Bearer $jwt',
@@ -150,7 +150,6 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final authenticated = await _auth.authenticate(
         localizedReason: 'Scan fingerprint to unlock',
-        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
       if (!authenticated || !mounted) return;
 

@@ -359,53 +359,44 @@ Future<void> _loadStudents() async {
 
   // ── Build ──────────────────────────────────────────────────────────────
   @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
+Widget build(BuildContext context) {
+  return DefaultTabController(
+    length: 2,
+    child: Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
         backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Admin Portal",
-                  style: TextStyle(color: Colors.orangeAccent)),
-              if (_institutionName != null)
-                Text(
-                  _institutionName!,
-                  style: const TextStyle(color: Colors.grey, fontSize: 11),
-                ),
-            ],
-          ),
-          actions: [
-            TextButton.icon(
-              onPressed: () => Navigator.of(context).pushNamed('/stats'),
-              icon: const Icon(Icons.bar_chart, color: Colors.cyanAccent),
-              label: const Text("STATS",
-                  style: TextStyle(color: Colors.cyanAccent)),
-            ),
-          ],
-          bottom: const TabBar(
-            indicatorColor: Colors.orangeAccent,
-            labelColor: Colors.orangeAccent,
-            unselectedLabelColor: Colors.grey,
-            tabs: [
-              Tab(icon: Icon(Icons.person_add), text: "Register"),
-              Tab(icon: Icon(Icons.storage),    text: "Database"),
-            ],
-          ),
-        ),
-        body: TabBarView(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildRegisterForm(),
-            _buildStudentList(),
+            const Text("Admin Portal",
+                style: TextStyle(color: Colors.orangeAccent)),
+            if (_institutionName != null)
+              Text(
+                _institutionName!,
+                style: const TextStyle(color: Colors.grey, fontSize: 11),
+              ),
+          ],
+        ),
+        bottom: const TabBar(
+          indicatorColor: Colors.orangeAccent,
+          labelColor: Colors.orangeAccent,
+          unselectedLabelColor: Colors.grey,
+          tabs: [
+            Tab(icon: Icon(Icons.person_add), text: "Register"),
+            Tab(icon: Icon(Icons.storage),    text: "Database"),
           ],
         ),
       ),
-    );
-  }
-
+      body: TabBarView(
+        children: [
+          _buildRegisterForm(),
+          _buildStudentList(),
+        ],
+      ),
+    ),
+  );
+}
   // ── Register form ──────────────────────────────────────────────────────
   Widget _buildRegisterForm() {
     final int capturedCount = _capturedImages.where((f) => f != null).length;

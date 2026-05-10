@@ -10,5 +10,4 @@ class AppConfig {
       "https://dazzling-intuition-production-297b.up.railway.app";
   static const String faceVerifyUrl =
       "https://smartattendancemvp-production.up.railway.app/verify";
-  static const String dashboardUrl = "https://faceattend.app/dashboard";
 }

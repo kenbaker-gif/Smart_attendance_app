@@ -162,22 +162,21 @@ class _SecurityWrapperState extends State<SecurityWrapper>
   // Biometric authentication
   // ─────────────────────────────────────────────────────────────────────────
 
-  Future<void> _authenticate() async {
-    try {
-      final authenticated = await _auth.authenticate(
-        localizedReason: 'Scan fingerprint to unlock',
-        options:
-            const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
-      );
+Future<void> _authenticate() async {
+  try {
+    final authenticated = await _auth.authenticate(
+      localizedReason: 'Scan fingerprint to unlock',
+    );
 
-      if (authenticated && mounted) {
-        setState(() => _isLocked = false);
-        _resetTimer();
-      }
-    } catch (e) {
-      debugPrint("Auth error: $e");
+    if (authenticated && mounted) {
+      setState(() => _isLocked = false);
+      _resetTimer();
     }
+  } catch (e) {
+    debugPrint("Auth error: $e");
   }
+}
+
 
   // ─────────────────────────────────────────────────────────────────────────
   // Build
@@ -212,7 +211,7 @@ class _SecurityWrapperState extends State<SecurityWrapper>
       onPointerDown: (_) => _resetTimer(),
       child: Stack(
         children: [
-          // The actual screen (AdminScreen, StatsScreen, VerificationScreen…)
+          // The actual screen (AdminScreen, VerificationScreen…)
           widget.child,
 
           // Privacy overlay — hides content when the app is backgrounded.
