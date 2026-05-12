@@ -3,11 +3,11 @@ class AppConfig {
 
   // API endpoints
   static const String checkTrialUrl =
-      "https://dazzling-intuition-production.up.railway.app";
+      "https://api.faceattend.app";
   static const String registerInstitutionUrl =
-      "https://dazzling-intuition-production-297b.up.railway.app/register-institution";
+      "https://api.faceattend.app/register-institution";
   static const String adminBaseUrl =
-      "https://dazzling-intuition-production-297b.up.railway.app";
+      "https://api.faceattend.app";
   static const String faceVerifyUrl =
-      "https://smartattendancemvp-production.up.railway.app/verify";
+      "https://mvp.faceattend.app/verify";
 }
