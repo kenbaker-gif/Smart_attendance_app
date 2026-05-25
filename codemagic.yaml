@@ -11,8 +11,10 @@ workflows:
     environment:
       flutter: stable
       vars:
+        TERM: xterm-256color
+
         # ── Shorebird ──────────────────────────
-        SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN        # add in CM dashboard → Environment variables
+        SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN
 
         # ── .env contents (injected at build) ──
         SUPABASE_URL: $SUPABASE_URL
@@ -21,57 +23,64 @@ workflows:
         GOOGLE_CLIENT_ID: $GOOGLE_CLIENT_ID
 
       android_signing:
-        - faceattend_keystore                    # name this group in CM dashboard
+        - faceattend_keystore
 
     triggering:
       events:
-        - tag                                    # trigger on version tags e.g. v1.0.0+21
+        - tag
       tag_patterns:
         - pattern: 'v*'
           include: true
 
     scripts:
-      # 1. Write .env file from CM environment variables
       - name: Create .env file
         script: |
+          export TERM=xterm-256color
           cat > .env <<EOF
           SUPABASE_URL=$SUPABASE_URL
           SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
           MVP_URL=$MVP_URL
           GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
           EOF
+          echo "✓ .env file created"
 
-      # 2. Install Shorebird CLI
       - name: Install Shorebird
         script: |
+          export TERM=xterm-256color
           curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/shorebird/main/install.sh -sSf | bash
           echo export PATH="$HOME/.shorebird/bin:$PATH" >> $CM_ENV
           source $CM_ENV
+          echo "✓ Shorebird installed: $(shorebird --version)"
 
-      # 3. Get Flutter dependencies
       - name: Flutter pub get
-        script: flutter pub get
+        script: |
+          export TERM=xterm-256color
+          flutter pub get
+          echo "✓ Dependencies resolved"
 
-      # 4. Generate launcher icons (android only — ios: false in pubspec)
       - name: Generate launcher icons
-        script: flutter pub run flutter_launcher_icons
+        script: |
+          export TERM=xterm-256color
+          flutter pub run flutter_launcher_icons
+          echo "✓ Launcher icons generated"
 
-      # 5. Shorebird release (builds signed AAB + uploads to Shorebird)
       - name: Shorebird Android release
         script: |
+          export TERM=xterm-256color
           shorebird release android \
             --artifact apk \
             -- --release
+          echo "✓ Shorebird release complete"
 
     artifacts:
       - build/**/outputs/**/*.apk
       - build/**/outputs/**/*.aab
-      - build/**/outputs/**/mapping.txt   # ProGuard mapping (useful for crash reports)
+      - build/**/outputs/**/mapping.txt
 
     publishing:
       google_play:
-        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS   # add in CM dashboard
-        track: internal                  # promote to alpha/beta/production manually
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
 
 
   # ─────────────────────────────────────────────
@@ -85,6 +94,7 @@ workflows:
     environment:
       flutter: stable
       vars:
+        TERM: xterm-256color
         SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN
         SUPABASE_URL: $SUPABASE_URL
         SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
@@ -94,24 +104,34 @@ workflows:
     scripts:
       - name: Create .env file
         script: |
+          export TERM=xterm-256color
           cat > .env <<EOF
           SUPABASE_URL=$SUPABASE_URL
           SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
           MVP_URL=$MVP_URL
           GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
           EOF
+          echo "✓ .env file created"
 
       - name: Install Shorebird
         script: |
+          export TERM=xterm-256color
           curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/shorebird/main/install.sh -sSf | bash
           echo export PATH="$HOME/.shorebird/bin:$PATH" >> $CM_ENV
           source $CM_ENV
+          echo "✓ Shorebird installed"
 
       - name: Flutter pub get
-        script: flutter pub get
+        script: |
+          export TERM=xterm-256color
+          flutter pub get
+          echo "✓ Dependencies resolved"
 
       - name: Shorebird Android patch
-        script: shorebird patch android
+        script: |
+          export TERM=xterm-256color
+          shorebird patch android
+          echo "✓ Shorebird patch complete"
 
     artifacts:
       - build/**/outputs/**/*.apk
@@ -128,40 +148,45 @@ workflows:
     environment:
       flutter: stable
       vars:
+        TERM: xterm-256color
         SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN
         SUPABASE_URL: $SUPABASE_URL
         SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
         MVP_URL: $MVP_URL
         GOOGLE_CLIENT_ID: $GOOGLE_CLIENT_ID
-        BUNDLE_ID: app.faceattend.mobile         # update to your actual bundle ID
+        BUNDLE_ID: app.faceattend.mobile
 
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: app.faceattend.mobile  # must match Apple Dev Portal
-        # Codemagic fetches cert + profile automatically via App Store Connect API key
-        # Add: APP_STORE_CONNECT_KEY_IDENTIFIER, APP_STORE_CONNECT_ISSUER_ID,
-        #      APP_STORE_CONNECT_PRIVATE_KEY in CM dashboard
+        bundle_identifier: app.faceattend.mobile
 
     scripts:
       - name: Create .env file
         script: |
+          export TERM=xterm-256color
           cat > .env <<EOF
           SUPABASE_URL=$SUPABASE_URL
           SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
           MVP_URL=$MVP_URL
           GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
           EOF
+          echo "✓ .env file created"
 
       - name: Install Shorebird
         script: |
+          export TERM=xterm-256color
           curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/shorebird/main/install.sh -sSf | bash
           echo export PATH="$HOME/.shorebird/bin:$PATH" >> $CM_ENV
           source $CM_ENV
+          echo "✓ Shorebird installed"
 
       - name: Flutter pub get
-        script: flutter pub get
+        script: |
+          export TERM=xterm-256color
+          flutter pub get
+          echo "✓ Dependencies resolved"
 
-      # Enable launcher icons for iOS when ready
+      # Uncomment when ready for iOS icons
       # - name: Enable iOS icons
       #   script: |
       #     sed -i '' 's/ios: false/ios: true/' pubspec.yaml
@@ -169,8 +194,10 @@ workflows:
 
       - name: Shorebird iOS release
         script: |
+          export TERM=xterm-256color
           shorebird release ios \
             -- --release
+          echo "✓ Shorebird iOS release complete"
 
     artifacts:
       - build/ios/ipa/*.ipa
