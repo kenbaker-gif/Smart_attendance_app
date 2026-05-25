@@ -54,7 +54,21 @@ Create a `.env` file in the project root with your Supabase credentials:
 ```env
 SUPABASE_URL=https://your-supabase-project.supabase.co
 SUPABASE_ANON_KEY=your_anon_key_here
+GOOGLE_WEB_CLIENT_ID=your_google_web_client_id_here
+API_URL=https://your-api.example.com
 ```
+
+Copy the example file locally before you run the app:
+
+```bash
+cp .env.example .env
+```
+
+> Note: `.env` is used for local development only. It is not packaged as an app asset, so secrets are not bundled into release builds.
+>
+> `lib/main.dart` loads this file at startup with `dotenv.load(fileName: ".env")`.
+
+A sample file is provided as `.env.example` so you can copy it locally and fill in your own values.
 
 Get these values from your Supabase project settings.
 
