@@ -1,0 +1,183 @@
+workflows:
+
+  # ─────────────────────────────────────────────
+  # ANDROID RELEASE  (Shorebird)
+  # ─────────────────────────────────────────────
+  android-release:
+    name: Android Release (Shorebird)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      flutter: stable
+      vars:
+        # ── Shorebird ──────────────────────────
+        SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN        # add in CM dashboard → Environment variables
+
+        # ── .env contents (injected at build) ──
+        SUPABASE_URL: $SUPABASE_URL
+        SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
+        MVP_URL: $MVP_URL
+        GOOGLE_CLIENT_ID: $GOOGLE_CLIENT_ID
+
+      android_signing:
+        - faceattend_keystore                    # name this group in CM dashboard
+
+    triggering:
+      events:
+        - tag                                    # trigger on version tags e.g. v1.0.0+21
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+
+    scripts:
+      # 1. Write .env file from CM environment variables
+      - name: Create .env file
+        script: |
+          cat > .env <<EOF
+          SUPABASE_URL=$SUPABASE_URL
+          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+          MVP_URL=$MVP_URL
+          GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+          EOF
+
+      # 2. Install Shorebird CLI
+      - name: Install Shorebird
+        script: |
+          curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/shorebird/main/install.sh -sSf | bash
+          echo export PATH="$HOME/.shorebird/bin:$PATH" >> $CM_ENV
+          source $CM_ENV
+
+      # 3. Get Flutter dependencies
+      - name: Flutter pub get
+        script: flutter pub get
+
+      # 4. Generate launcher icons (android only — ios: false in pubspec)
+      - name: Generate launcher icons
+        script: flutter pub run flutter_launcher_icons
+
+      # 5. Shorebird release (builds signed AAB + uploads to Shorebird)
+      - name: Shorebird Android release
+        script: |
+          shorebird release android \
+            --artifact apk \
+            -- --release
+
+    artifacts:
+      - build/**/outputs/**/*.apk
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt   # ProGuard mapping (useful for crash reports)
+
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS   # add in CM dashboard
+        track: internal                  # promote to alpha/beta/production manually
+
+
+  # ─────────────────────────────────────────────
+  # ANDROID PATCH  (Shorebird hot-fix)
+  # ─────────────────────────────────────────────
+  android-patch:
+    name: Android Patch (Shorebird)
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+
+    environment:
+      flutter: stable
+      vars:
+        SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN
+        SUPABASE_URL: $SUPABASE_URL
+        SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
+        MVP_URL: $MVP_URL
+        GOOGLE_CLIENT_ID: $GOOGLE_CLIENT_ID
+
+    scripts:
+      - name: Create .env file
+        script: |
+          cat > .env <<EOF
+          SUPABASE_URL=$SUPABASE_URL
+          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+          MVP_URL=$MVP_URL
+          GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+          EOF
+
+      - name: Install Shorebird
+        script: |
+          curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/shorebird/main/install.sh -sSf | bash
+          echo export PATH="$HOME/.shorebird/bin:$PATH" >> $CM_ENV
+          source $CM_ENV
+
+      - name: Flutter pub get
+        script: flutter pub get
+
+      - name: Shorebird Android patch
+        script: shorebird patch android
+
+    artifacts:
+      - build/**/outputs/**/*.apk
+
+
+  # ─────────────────────────────────────────────
+  # iOS RELEASE  (ready when you have Apple account)
+  # ─────────────────────────────────────────────
+  ios-release:
+    name: iOS Release (Shorebird)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      flutter: stable
+      vars:
+        SHOREBIRD_TOKEN: $SHOREBIRD_TOKEN
+        SUPABASE_URL: $SUPABASE_URL
+        SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
+        MVP_URL: $MVP_URL
+        GOOGLE_CLIENT_ID: $GOOGLE_CLIENT_ID
+        BUNDLE_ID: app.faceattend.mobile         # update to your actual bundle ID
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.faceattend.mobile  # must match Apple Dev Portal
+        # Codemagic fetches cert + profile automatically via App Store Connect API key
+        # Add: APP_STORE_CONNECT_KEY_IDENTIFIER, APP_STORE_CONNECT_ISSUER_ID,
+        #      APP_STORE_CONNECT_PRIVATE_KEY in CM dashboard
+
+    scripts:
+      - name: Create .env file
+        script: |
+          cat > .env <<EOF
+          SUPABASE_URL=$SUPABASE_URL
+          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+          MVP_URL=$MVP_URL
+          GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+          EOF
+
+      - name: Install Shorebird
+        script: |
+          curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/shorebird/main/install.sh -sSf | bash
+          echo export PATH="$HOME/.shorebird/bin:$PATH" >> $CM_ENV
+          source $CM_ENV
+
+      - name: Flutter pub get
+        script: flutter pub get
+
+      # Enable launcher icons for iOS when ready
+      # - name: Enable iOS icons
+      #   script: |
+      #     sed -i '' 's/ios: false/ios: true/' pubspec.yaml
+      #     flutter pub run flutter_launcher_icons
+
+      - name: Shorebird iOS release
+        script: |
+          shorebird release ios \
+            -- --release
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: true
