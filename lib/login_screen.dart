@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:camera/camera.dart';
-// import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'signup_screen.dart';
-// import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -25,6 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final LocalAuthentication _auth = LocalAuthentication();
 
+  // Google Sign-In: serverClientId is the WEB client ID from Google Cloud Console.
+  // The native SDK needs this to mint an idToken that Supabase can verify.
+
   bool _isLoading        = false;
   bool _obscurePassword  = true;
   bool _hasSession       = false;
@@ -33,6 +36,9 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _hasSession = Supabase.instance.client.auth.currentSession != null;
+    GoogleSignIn.instance.initialize(
+      serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
+    );
   }
 
   @override
@@ -54,8 +60,8 @@ class _LoginScreenState extends State<LoginScreen> {
       debugPrint('[StatusCheck] profileRes: $profileRes');
 
       if (profileRes.isEmpty) {
-        debugPrint('[StatusCheck] No profile found — allowing login');
-        return null;
+        debugPrint('[StatusCheck] No profile found — blocking login');
+        return 'Account not registered. Contact your institution admin.';
       }
 
       final isSuperAdmin = profileRes[0]['is_super_admin'];
@@ -146,6 +152,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // ── Biometric unlock ─────────────────────────────────────────────────
   Future<void> _authenticate() async {
     try {
       final authenticated = await _auth.authenticate(
@@ -166,7 +173,6 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // Log biometric login event
       if (session != null) {
         await _logLoginEvent(session.accessToken);
       }
@@ -177,6 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // ── Email / password login ────────────────────────────────────────────
   Future<void> _login() async {
     if (_emailController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
@@ -185,13 +192,11 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => _isLoading = true);
     try {
-      // 1. Supabase auth
       final res = await Supabase.instance.client.auth.signInWithPassword(
         email:    _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      // 2. Check institution status
       final userId = res.user?.id;
       if (userId != null) {
         final error = await _checkInstitutionStatus(userId);
@@ -202,7 +207,6 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // 3. Log login event (fire and forget — won't block navigation)
       if (res.session != null) {
         _logLoginEvent(res.session!.accessToken);
       }
@@ -212,6 +216,59 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) _showSnack(e.message, isError: true);
     } catch (e) {
       if (mounted) _showSnack("Login failed. Please try again.", isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ── Google Sign-In ────────────────────────────────────────────────────
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      final googleUser = await GoogleSignIn.instance.authenticate();
+      final idToken = googleUser.authentication.idToken;
+
+      if (idToken == null) {
+        debugPrint('[Google SignIn] idToken is null — check GOOGLE_WEB_CLIENT_ID');
+        if (mounted) _showSnack('Google sign-in failed. Check configuration.', isError: true);
+        return;
+      }
+
+      final res = await Supabase.instance.client.auth.signInWithIdToken(
+        provider:    OAuthProvider.google,
+        idToken:     idToken,
+      );
+
+      final userId = res.user?.id;
+      if (userId != null) {
+        final error = await _checkInstitutionStatus(userId);
+        if (error != null) {
+          await Supabase.instance.client.auth.signOut();
+          await GoogleSignIn.instance.signOut();
+          if (mounted) _showSnack(error, isError: true);
+          return;
+        }
+      }
+
+      if (res.session != null) {
+        _logLoginEvent(res.session!.accessToken);
+      }
+
+      if (mounted) _navigateAfterLogin();
+
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        debugPrint('[Google SignIn] cancelled by user');
+        return;
+      }
+      debugPrint('[Google SignIn] GoogleSignInException: ${e.code}');
+      if (mounted) _showSnack('Google sign-in failed. Try again.', isError: true);
+    } on AuthException catch (e) {
+      debugPrint('[Google SignIn] AuthException: ${e.message}');
+      if (mounted) _showSnack(e.message, isError: true);
+    } catch (e) {
+      debugPrint('[Google SignIn] error: $e');
+      if (mounted) _showSnack('Google sign-in failed. Try again.', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -230,21 +287,21 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _openForgotPassword() async {
-  final uri = Uri.parse('https://faceattend.app/reset-password');
-  try {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } catch (e) {
-    debugPrint('[forgot-password] launch error: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Could not open browser. Visit faceattend.app/reset-password manually."),
-          backgroundColor: Colors.red,
-        ),
-      );
+    final uri = Uri.parse('https://faceattend.app/reset-password');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('[forgot-password] launch error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Could not open browser. Visit faceattend.app/reset-password manually."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -305,12 +362,13 @@ class _LoginScreenState extends State<LoginScreen> {
                             _obscurePassword ? Icons.visibility_off : Icons.visibility,
                             color: Colors.grey, size: 20,
                           ),
-                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          onPressed: () =>
+                              setState(() => _obscurePassword = !_obscurePassword),
                         ),
                       ),
                     ),
 
-                    // Forgot password link
+                    // Forgot password
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -320,10 +378,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: const Text(
-                          'Forgot password?',
-                          style: TextStyle(fontSize: 13),
-                        ),
+                        child: const Text('Forgot password?',
+                            style: TextStyle(fontSize: 13)),
                       ),
                     ),
 
@@ -342,11 +398,31 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             onPressed: _login,
                             child: const Text("LOGIN",
-                                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1)),
                           ),
 
+                    const SizedBox(height: 12),
+
+                    // Google Sign-In button
+                    if (!_isLoading)
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.grey),
+                          minimumSize: const Size(double.infinity, 52),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _signInWithGoogle,
+                        icon: const Icon(Icons.g_mobiledata,
+                            size: 26, color: Colors.white),
+                        label: const Text("CONTINUE WITH GOOGLE"),
+                      ),
+
                     // Biometric
-                    if (_hasSession) ...[
+                    if (_hasSession && !_isLoading) ...[
                       const SizedBox(height: 12),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
@@ -393,7 +469,8 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  InputDecoration _inputDecoration(String label, IconData icon, {Widget? suffix}) {
+  InputDecoration _inputDecoration(String label, IconData icon,
+      {Widget? suffix}) {
     return InputDecoration(
       labelText: label,
       labelStyle: const TextStyle(color: Colors.grey),

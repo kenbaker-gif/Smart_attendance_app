@@ -1,4 +1,4 @@
-package com.example.smart_attendance_app
+package app.faceattend.attendance
 
 import android.os.Bundle
 import android.webkit.WebView
