@@ -191,26 +191,72 @@ class _TrialGateState extends State<TrialGate> {
   }
 
   Future<void> _checkTrial() async {
+    if (mounted) setState(() => _loading = true);
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) {
-        setState(() => _loading = false);
+        if (mounted) setState(() => _loading = false);
         return;
       }
 
       final profile = await Supabase.instance.client
           .from('profiles')
-          .select('institution_id')
+          .select('institution_id, is_super_admin')
           .eq('id', user.id)
           .limit(1)
           .single();
 
-      final institutionId = profile['institution_id'] as String?;
-      if (institutionId == null) {
-        setState(() => _loading = false);
+      // Super admins are never gated
+      if (profile['is_super_admin'] == true) {
+        if (mounted) setState(() { _active = true; _loading = false; });
         return;
       }
 
+      final institutionId = profile['institution_id'] as String?;
+      if (institutionId == null) {
+        if (mounted) setState(() { _active = true; _loading = false; });
+        return;
+      }
+
+      // Check institution status directly from Supabase first
+      final instRes = await Supabase.instance.client
+          .from('institutions')
+          .select('status, plans')
+          .eq('id', institutionId)
+          .limit(1)
+          .single();
+
+      final instStatus = instRes['status']?.toString().toLowerCase().trim();
+      final instPlan   = instRes['plans']?.toString().toLowerCase().trim();
+
+      // If suspended or pending, block immediately without calling /check-trial
+      if (instStatus == 'suspended') {
+        if (mounted) setState(() {
+          _active  = false;
+          _pending = false;
+          _reason  = 'suspended';
+          _loading = false;
+        });
+        return;
+      }
+
+      if (instStatus == 'pending') {
+        if (mounted) setState(() {
+          _active  = false;
+          _pending = true;
+          _reason  = 'pending';
+          _loading = false;
+        });
+        return;
+      }
+
+      // If on a paid plan, skip trial check entirely — always active
+      if (instPlan != null && instPlan != 'trial') {
+        if (mounted) setState(() { _active = true; _loading = false; });
+        return;
+      }
+
+      // Only call /check-trial for actual trial institutions
       final baseUrl = dotenv.env['API_URL'] ?? AppConfig.checkTrialUrl;
       final response = await http.get(
         Uri.parse('$baseUrl/check-trial/$institutionId'),
@@ -218,23 +264,25 @@ class _TrialGateState extends State<TrialGate> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final active = data['active'] as bool? ?? true;
-        final reason = data['reason'] as String? ?? '';
+        final active   = data['active'] as bool? ?? true;
+        final reason   = data['reason'] as String? ?? '';
         final daysLeft = data['days_left'] as int?;
 
-        setState(() {
-          _active = active;
-          _reason = reason;
+        if (mounted) setState(() {
+          _active   = active;
+          _reason   = reason;
           _daysLeft = daysLeft;
-          _pending = reason.toLowerCase().contains('pending');
-          _loading = false;
+          _pending  = reason.toLowerCase().contains('pending');
+          _loading  = false;
         });
       } else {
-        setState(() => _loading = false);
+        // If check-trial endpoint fails, don't block the user
+        if (mounted) setState(() { _active = true; _loading = false; });
       }
     } catch (e) {
       debugPrint('Trial check error: $e');
-      setState(() => _loading = false);
+      // On error, don't block the user
+      if (mounted) setState(() { _active = true; _loading = false; });
     }
   }
 
@@ -250,9 +298,48 @@ class _TrialGateState extends State<TrialGate> {
     }
 
     if (!_active) {
-      return _pending
-          ? _PendingScreen()
-          : _TrialExpiredScreen(reason: _reason);
+      if (_pending) return _PendingScreen();
+      if (_reason == 'suspended') {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.block, color: Colors.redAccent, size: 64),
+                  const SizedBox(height: 24),
+                  const Text('Institution Suspended',
+                      style: TextStyle(color: Colors.white, fontSize: 24,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Your institution has been suspended. Please contact support.',
+                    style: TextStyle(color: Colors.white70, fontSize: 15),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 32),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.cyanAccent,
+                      side: const BorderSide(color: Colors.cyanAccent),
+                    ),
+                    onPressed: () async {
+                      await Supabase.instance.client.auth.signOut();
+                      if (context.mounted) {
+                        Navigator.pushReplacementNamed(context, '/login');
+                      }
+                    },
+                    child: const Text('Sign Out'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+      return _TrialExpiredScreen(reason: _reason);
     }
 
     if (_daysLeft != null && _daysLeft! <= 7) {
