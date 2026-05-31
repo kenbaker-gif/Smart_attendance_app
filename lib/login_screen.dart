@@ -328,7 +328,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         size: 72, color: Colors.cyanAccent),
                     const SizedBox(height: 16),
                     Text(
-                      _hasSession ? "Welcome Back" : "Smart Attendance",
+                      _hasSession ? "Welcome Back" : "Face Attend",
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 26,
