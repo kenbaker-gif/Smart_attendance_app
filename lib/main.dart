@@ -229,7 +229,7 @@ class _TrialGateState extends State<TrialGate> {
       final instStatus = instRes['status']?.toString().toLowerCase().trim();
       final instPlan   = instRes['plans']?.toString().toLowerCase().trim();
 
-      // If suspended or pending, block immediately without calling /check-trial
+      // If suspended, block immediately
       if (instStatus == 'suspended') {
         if (mounted) setState(() {
           _active  = false;
@@ -240,6 +240,7 @@ class _TrialGateState extends State<TrialGate> {
         return;
       }
 
+      // If pending, block immediately
       if (instStatus == 'pending') {
         if (mounted) setState(() {
           _active  = false;
@@ -256,32 +257,27 @@ class _TrialGateState extends State<TrialGate> {
         return;
       }
 
-      // Only call /check-trial for actual trial institutions
+      // status=active + trial plan — call /check-trial for days remaining only
+      // never block if status is active, only used for warning banner
       final baseUrl = dotenv.env['API_URL'] ?? AppConfig.checkTrialUrl;
       final response = await http.get(
         Uri.parse('$baseUrl/check-trial/$institutionId'),
       );
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final active   = data['active'] as bool? ?? true;
-        final reason   = data['reason'] as String? ?? '';
+        final data     = jsonDecode(response.body);
         final daysLeft = data['days_left'] as int?;
 
         if (mounted) setState(() {
-          _active   = active;
-          _reason   = reason;
+          _active   = true;  // status=active always wins
           _daysLeft = daysLeft;
-          _pending  = reason.toLowerCase().contains('pending');
           _loading  = false;
         });
       } else {
-        // If check-trial endpoint fails, don't block the user
         if (mounted) setState(() { _active = true; _loading = false; });
       }
     } catch (e) {
       debugPrint('Trial check error: $e');
-      // On error, don't block the user
       if (mounted) setState(() { _active = true; _loading = false; });
     }
   }
