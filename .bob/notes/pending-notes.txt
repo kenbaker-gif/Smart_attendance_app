@@ -1,0 +1,2 @@
+{"id":"2940c027-e1dc-4f9b-9af4-db2948ad7444","ts":"2026-06-07T09:55:53.694Z","path":"/root/Smart_attendance_app/README.md","version":"1.0.0","taskID":"6b2be3fd-261f-401f-bdfa-f31417a870e9"}
+{"id":"0d66370f-4529-481e-9a3d-8485c32ce543","ts":"2026-06-07T09:56:25.073Z","path":"/root/Smart_attendance_app/ios/Runner/Info.plist","version":"1.0.0","taskID":"6b2be3fd-261f-401f-bdfa-f31417a870e9"}

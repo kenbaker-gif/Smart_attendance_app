@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is required to capture face images for attendance verification.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID is used for secure biometric authentication.</string>
 </dict>
 </plist>

@@ -10,6 +10,7 @@ import 'login_screen.dart';
 import 'admin_screen.dart';
 import 'security_wrapper.dart';
 import 'signup_screen.dart';
+import 'session_gate_screen.dart';
 import 'config.dart';
 
 List<CameraDescription> cameras = [];
@@ -112,9 +113,18 @@ class _HomeBuilderState extends State<_HomeBuilder> {
 
       final institutionId = profile['institution_id'] as String? ?? '';
       final rawUnits = profile['course_unit_id'];
-      final unitIds = rawUnits is List
-          ? rawUnits.map((e) => e.toString()).toList()
-          : <String>[];
+      List<String> unitIds = [];
+      if (rawUnits is List) {
+        unitIds = rawUnits.map((e) => e.toString()).toList();
+      } else if (rawUnits is String) {
+        // Some setups store JSON arrays as strings; try to decode.
+        try {
+          final decoded = jsonDecode(rawUnits);
+          if (decoded is List) unitIds = decoded.map((e) => e.toString()).toList();
+        } catch (_) {
+          unitIds = [];
+        }
+      }
 
       List<Map<String, dynamic>> courseUnits = [];
 
@@ -156,7 +166,7 @@ class _HomeBuilderState extends State<_HomeBuilder> {
     }
     return TrialGate(
       cameras: widget.cameras,
-      child: VerificationScreen(
+      child: SessionGateScreen(
         cameras: widget.cameras,
         institutionId: _institutionId,
         courseUnits: _courseUnits,
@@ -338,23 +348,25 @@ class _TrialGateState extends State<TrialGate> {
       return _TrialExpiredScreen(reason: _reason);
     }
 
-    if (_daysLeft != null && _daysLeft! <= 7) {
-      return Column(
-        children: [
-          Container(
-            width: double.infinity,
-            color: _daysLeft! <= 3 ? Colors.red[900] : Colors.orange[900],
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            child: Text(
-              '⚠️  Trial expires in $_daysLeft day${_daysLeft == 1 ? '' : 's'}. Contact us to upgrade.',
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          Expanded(child: widget.child),
-        ],
-      );
-    }
+   if (_daysLeft != null && _daysLeft! <= 7) {
+  return Column(
+    children: [
+      Container(
+        width: double.infinity,
+        color: _daysLeft! <= 3 ? Colors.red[900] : Colors.orange[900],
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        child: Text(
+          _daysLeft! > 0
+              ? '⚠️  Trial expires in $_daysLeft day${_daysLeft == 1 ? '' : 's'}. Contact us to upgrade.'
+              : '⚠️  Trial has expired. Contact us to upgrade.',
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          textAlign: TextAlign.center,
+        ),
+      ),
+      Expanded(child: widget.child),
+    ],
+  );
+}
 
     return widget.child;
   }
