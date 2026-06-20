@@ -89,6 +89,7 @@ class _HomeBuilderState extends State<_HomeBuilder> {
   String _institutionId = '';
   List<Map<String, dynamic>> _courseUnits = [];
   bool _loading = true;
+  String _role = 'admin'; // add role state variable
 
   @override
   void initState() {
@@ -106,12 +107,13 @@ class _HomeBuilderState extends State<_HomeBuilder> {
 
       final profile = await Supabase.instance.client
           .from('profiles')
-          .select('institution_id, course_unit_id')
+          .select('institution_id, course_unit_id, role')
           .eq('id', user.id)
           .limit(1)
           .single();
 
       final institutionId = profile['institution_id'] as String? ?? '';
+      final role = profile['role']?.toString() ?? 'admin';
       final rawUnits = profile['course_unit_id'];
       List<String> unitIds = [];
       if (rawUnits is List) {
@@ -147,6 +149,7 @@ class _HomeBuilderState extends State<_HomeBuilder> {
         setState(() {
           _institutionId = institutionId;
           _courseUnits = courseUnits;
+          _role = role;
           _loading = false;
         });
       }
@@ -164,13 +167,18 @@ class _HomeBuilderState extends State<_HomeBuilder> {
         body: Center(child: CircularProgressIndicator(color: Colors.cyanAccent)),
       );
     }
+
+    final user = Supabase.instance.client.auth.currentUser;
+    // role is already fetched — add it to _loadProfile
     return TrialGate(
       cameras: widget.cameras,
-      child: SessionGateScreen(
-        cameras: widget.cameras,
-        institutionId: _institutionId,
-        courseUnits: _courseUnits,
-      ),
+      child: _role == 'coordinator'
+          ? SessionGateScreen(
+              cameras: widget.cameras,
+              institutionId: _institutionId,
+              courseUnits: _courseUnits,
+            )
+          : AdminScreen(cameras: widget.cameras),
     );
   }
 }
@@ -270,8 +278,14 @@ class _TrialGateState extends State<TrialGate> {
       // status=active + trial plan — call /check-trial for days remaining only
       // never block if status is active, only used for warning banner
       final baseUrl = dotenv.env['API_URL'] ?? AppConfig.checkTrialUrl;
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken;
+      
       final response = await http.get(
         Uri.parse('$baseUrl/check-trial/$institutionId'),
+        headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
       );
 
       if (response.statusCode == 200) {

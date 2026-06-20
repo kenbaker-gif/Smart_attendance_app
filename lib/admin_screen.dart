@@ -128,6 +128,52 @@ void _kickOutWithMessage(String message) {
 
 void _kickOut() => _kickOutWithMessage("Unauthorized Access");
 
+
+  // ── Logout ─────────────────────────────────────────────────────────────
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0f0f1c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Logout",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text(
+          "Are you sure you want to logout?",
+          style: TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Logout", style: TextStyle(color: Colors.orangeAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await Supabase.instance.client.auth.signOut();
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ Logout failed: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // ── Load students ──────────────────────────────────────────────────────
 Future<void> _loadStudents() async {
   setState(() => _isLoading = true);
@@ -366,25 +412,36 @@ Widget build(BuildContext context) {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
+        elevation: 4,
+        shadowColor: Colors.orangeAccent.withOpacity(0.2),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text("Admin Portal",
-                style: TextStyle(color: Colors.orangeAccent)),
+                style: TextStyle(color: Colors.orangeAccent, fontSize: 20, fontWeight: FontWeight.bold)),
             if (_institutionName != null)
               Text(
                 _institutionName!,
-                style: const TextStyle(color: Colors.grey, fontSize: 11),
+                style: TextStyle(color: Colors.grey[400], fontSize: 12),
               ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.orangeAccent, size: 24),
+            tooltip: "Logout",
+            onPressed: _logout,
+          ),
+        ],
         bottom: const TabBar(
           indicatorColor: Colors.orangeAccent,
+          indicatorWeight: 3,
           labelColor: Colors.orangeAccent,
           unselectedLabelColor: Colors.grey,
+          labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
           tabs: [
-            Tab(icon: Icon(Icons.person_add), text: "Register"),
-            Tab(icon: Icon(Icons.storage),    text: "Database"),
+            Tab(icon: Icon(Icons.person_add, size: 22), text: "Register"),
+            Tab(icon: Icon(Icons.storage, size: 22),    text: "Database"),
           ],
         ),
       ),
@@ -409,18 +466,33 @@ Widget build(BuildContext context) {
         children: [
           if (_institutionId != null)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.orangeAccent.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orangeAccent.withOpacity(0.4)),
+                color: Colors.orangeAccent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orangeAccent.withOpacity(0.4), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orangeAccent.withOpacity(0.15),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ],
               ),
-              child: Text(
-                "Institution: $_institutionName ($_institutionId)",
-                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.school, color: Colors.orangeAccent, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Institution: $_institutionName ($_institutionId)",
+                      style: const TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
               ),
             ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
 
           Row(
             children: List.generate(4, (i) {
@@ -495,16 +567,18 @@ Widget build(BuildContext context) {
                     backgroundColor:
                         allCaptured ? Colors.orangeAccent : Colors.grey[700],
                     foregroundColor: Colors.black,
-                    minimumSize: const Size(double.infinity, 50),
+                    minimumSize: const Size(double.infinity, 56),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                        borderRadius: BorderRadius.circular(14)),
+                    elevation: allCaptured ? 8 : 0,
+                    shadowColor: allCaptured ? Colors.orangeAccent.withOpacity(0.5) : null,
                   ),
                   onPressed: _registerStudent,
                   child: Text(
                     allCaptured
                         ? "FINALIZE REGISTRATION"
                         : "CAPTURE ALL 4 PHOTOS TO REGISTER",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 1.2),
                   ),
                 ),
         ],
@@ -523,15 +597,22 @@ Widget build(BuildContext context) {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.grey[900],
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isDone
                 ? Colors.green
                 : isActive
                     ? Colors.orangeAccent
                     : Colors.grey[700]!,
-            width: isActive ? 2 : 1,
+            width: isActive || isDone ? 2 : 1,
           ),
+          boxShadow: isDone || isActive ? [
+            BoxShadow(
+              color: (isDone ? Colors.green : Colors.orangeAccent).withOpacity(0.3),
+              blurRadius: 8,
+              spreadRadius: 1,
+            ),
+          ] : null,
         ),
         child: Stack(
           children: [
@@ -663,43 +744,60 @@ Widget build(BuildContext context) {
           future: _getSignedUrl(filePath),
           builder: (context, snapshot) {
             final imageUrl = snapshot.data;
-            return ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.grey[800],
-                child: ClipOval(
-                  child: imageUrl != null
-                      ? Image.network(
-                          imageUrl,
-                          fit: BoxFit.cover,
-                          width: 40,
-                          height: 40,
-                          errorBuilder: (_, __, ___) =>
-                              const Icon(Icons.person, color: Colors.white54),
-                          loadingBuilder: (_, child, progress) =>
-                              progress == null
-                                  ? child
-                                  : const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.orangeAccent),
-                                    ),
-                        )
-                      : const Icon(Icons.person, color: Colors.white54),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey[800]!, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.grey[800],
+                  child: ClipOval(
+                    child: imageUrl != null
+                        ? Image.network(
+                            imageUrl,
+                            fit: BoxFit.cover,
+                            width: 48,
+                            height: 48,
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.person, color: Colors.white54, size: 24),
+                            loadingBuilder: (_, child, progress) =>
+                                progress == null
+                                    ? child
+                                    : const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.orangeAccent),
+                                      ),
+                          )
+                        : const Icon(Icons.person, color: Colors.white54, size: 24),
+                  ),
                 ),
-              ),
-              title: Text(
-                studentName,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              subtitle: Text("ID: $studentId",
-                  style: const TextStyle(color: Colors.grey)),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
-                tooltip: "Delete student",
-                onPressed: () => _deleteStudent(studentId, studentName),
+                title: Text(
+                  studentName,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                subtitle: Text("ID: $studentId",
+                    style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 24),
+                  tooltip: "Delete student",
+                  onPressed: () => _deleteStudent(studentId, studentName),
+                ),
               ),
             );
           },
