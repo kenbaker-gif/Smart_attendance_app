@@ -12,21 +12,20 @@ import 'config.dart';
 class VerificationScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   final String institutionId;
-  final List<Map<String, dynamic>> courseUnits;
-
   // ── New session params ─────────────────────────────────────────────────
   final String? sessionId;
   final String? lecturerName;
   final String? lecturerId;
+  final String? courseUnitId;
 
   const VerificationScreen({
     super.key,
     required this.cameras,
     required this.institutionId,
-    this.courseUnits = const [],
     this.sessionId,
     this.lecturerName,
     this.lecturerId,
+    this.courseUnitId,
   });
 
   @override
@@ -43,9 +42,6 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Map<String, dynamic>? _result;
   bool _isAdmin = false;
 
-  // Session-level selected unit — persists across scans
-  Map<String, dynamic>? _selectedCourseUnit;
-
   // ── Session state ──────────────────────────────────────────────────────
   bool _isEndingSession = false;
   bool _sessionEnded = false;
@@ -58,9 +54,27 @@ class _VerificationScreenState extends State<VerificationScreen> {
     super.initState();
     _initCamera(_selectedCameraIndex);
     _fetchAdminStatus();
+    _loadScannedCount();
+  }
 
-    if (widget.courseUnits.length == 1) {
-      _selectedCourseUnit = widget.courseUnits.first;
+  // ── Load scanned count from attendance records ────────────────────────
+  Future<void> _loadScannedCount() async {
+    if (widget.sessionId == null) return;
+    
+    try {
+      final rows = await Supabase.instance.client
+          .from('attendance_records')
+          .select('id')
+          .eq('session_id', widget.sessionId!);
+      
+      if (mounted) {
+        setState(() {
+          _scannedCount = rows.length;
+        });
+      }
+    } catch (e) {
+      debugPrint('_loadScannedCount error: $e');
+      // Keep _scannedCount at 0 on error
     }
   }
 
@@ -146,54 +160,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
     return File(result.path);
   }
 
-  Future<Map<String, dynamic>?> _pickCourseUnit() async {
-    return showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      backgroundColor: const Color(0xFF1A1A2E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Which class are you taking attendance for?",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...widget.courseUnits.map((unit) {
-                return ListTile(
-                  onTap: () => Navigator.of(ctx).pop(unit),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  tileColor: Colors.white.withOpacity(0.05),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  title: Text(
-                    unit['name'] ?? unit['id'],
-                    style: const TextStyle(
-                        color: Colors.cyanAccent, fontSize: 15),
-                  ),
-                  trailing: const Icon(Icons.arrow_forward_ios,
-                      color: Colors.white38, size: 14),
-                );
-              }),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-  }
+
 
   // ── End session ────────────────────────────────────────────────────────
   Future<void> _endSession() async {
@@ -355,16 +322,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
       return;
     }
 
-    if (widget.courseUnits.length > 1 && _selectedCourseUnit == null) {
-      final picked = await _pickCourseUnit();
-      if (picked == null) return;
-      setState(() => _selectedCourseUnit = picked);
-    }
 
-    if (widget.courseUnits.isEmpty) {
-      _showError("No course units assigned. Contact your admin.");
-      return;
-    }
 
     setState(() {
       _isScanning = true;
@@ -396,8 +354,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
       request.headers['Authorization'] = 'Bearer $token';
       request.fields['institution_id'] = widget.institutionId;
 
-      if (_selectedCourseUnit != null) {
-        request.fields['course_unit_id'] = _selectedCourseUnit!['id'];
+      if (widget.courseUnitId != null) {
+        request.fields['course_unit_id'] = widget.courseUnitId!;
       }
 
       // ── Send session_id with every scan ────────────────────────────────
@@ -507,7 +465,6 @@ class _VerificationScreenState extends State<VerificationScreen> {
         lecturerName: widget.lecturerName,
         cameras: widget.cameras,
         institutionId: widget.institutionId,
-        courseUnits: widget.courseUnits,
       );
     }
 
@@ -587,71 +544,13 @@ class _VerificationScreenState extends State<VerificationScreen> {
                         style: const TextStyle(
                             color: Colors.white70, fontSize: 12),
                       ),
-                      if (_selectedCourseUnit != null) ...[
-                        const Text('  ·  ',
-                            style: TextStyle(color: Colors.white38)),
-                        const Icon(Icons.menu_book_outlined,
-                            color: Colors.white54, size: 13),
-                        const SizedBox(width: 5),
-                        Text(
-                          _selectedCourseUnit!['name'] ?? '',
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 12),
-                        ),
-                      ],
                     ],
                   ),
                 ),
               ),
             ),
 
-          // 5. ACTIVE CLASS CHIP — unit switcher (only if no session)
-          if (_selectedCourseUnit != null &&
-              widget.courseUnits.length > 1 &&
-              widget.sessionId == null)
-            Positioned(
-              top: 110, left: 0, right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () async {
-                    final picked = await _pickCourseUnit();
-                    if (picked != null) {
-                      setState(() => _selectedCourseUnit = picked);
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.cyanAccent.withOpacity(0.15),
-                      border:
-                          Border.all(color: Colors.cyanAccent, width: 1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.class_outlined,
-                            color: Colors.cyanAccent, size: 14),
-                        const SizedBox(width: 6),
-                        Text(
-                          _selectedCourseUnit!['name'] ??
-                              _selectedCourseUnit!['id'],
-                          style: const TextStyle(
-                            color: Colors.cyanAccent,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const Icon(Icons.swap_horiz,
-                            color: Colors.cyanAccent, size: 14),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+
 
           // 6. RESULTS DISPLAY
           if (_result != null && !_sessionEnded)
@@ -897,14 +796,12 @@ class _SessionDoneScreen extends StatelessWidget {
   final String? lecturerName;
   final List<CameraDescription> cameras;
   final String institutionId;
-  final List<Map<String, dynamic>> courseUnits;
 
   const _SessionDoneScreen({
     required this.scannedCount,
     required this.lecturerName,
     required this.cameras,
     required this.institutionId,
-    required this.courseUnits,
   });
 
   @override

@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'signup_screen.dart';
+import 'session_gate_screen.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -25,12 +26,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final LocalAuthentication _auth = LocalAuthentication();
 
-  // Google Sign-In: serverClientId is the WEB client ID from Google Cloud Console.
-  // The native SDK needs this to mint an idToken that Supabase can verify.
-
-  bool _isLoading        = false;
-  bool _obscurePassword  = true;
-  bool _hasSession       = false;
+  bool _isLoading       = false;
+  bool _obscurePassword = true;
+  bool _hasSession      = false;
 
   @override
   void initState() {
@@ -49,35 +47,36 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // ── Check institution status after auth ───────────────────────────────
-  Future<String?> _checkInstitutionStatus(String userId) async {
+  Future<Map<String, dynamic>> _checkInstitutionStatus(String userId) async {
     try {
       final profileRes = await Supabase.instance.client
           .from('profiles')
-          .select('institution_id, is_super_admin')
+          .select('institution_id, is_super_admin, role')
           .eq('id', userId)
           .limit(1);
 
       debugPrint('[StatusCheck] profileRes: $profileRes');
 
       if (profileRes.isEmpty) {
-        debugPrint('[StatusCheck] No profile found — blocking login');
-        return 'Account not registered. Contact your institution admin.';
+        return {'error': 'Account not registered. Contact your institution admin.'};
       }
 
       final isSuperAdmin = profileRes[0]['is_super_admin'];
-      debugPrint('[StatusCheck] is_super_admin: $isSuperAdmin');
+      final role = profileRes[0]['role']?.toString();
 
       if (isSuperAdmin == true) {
-        debugPrint('[StatusCheck] Super admin — bypassing status check');
-        return null;
+        return {'role': 'super_admin'};
+      }
+
+      // Block roles not allowed in Flutter app
+      const flutterAllowed = ['admin', 'dept_admin', 'coordinator'];
+      if (role == null || !flutterAllowed.contains(role)) {
+        return {'error': 'Your account is only used to confirm attendance sessions, thank you'};
       }
 
       final institutionId = profileRes[0]['institution_id'];
-      debugPrint('[StatusCheck] institution_id: $institutionId');
-
       if (institutionId == null) {
-        debugPrint('[StatusCheck] No institution_id — allowing login');
-        return null;
+        return {'role': role};
       }
 
       final institutionRes = await Supabase.instance.client
@@ -86,29 +85,24 @@ class _LoginScreenState extends State<LoginScreen> {
           .eq('id', institutionId)
           .limit(1);
 
-      debugPrint('[StatusCheck] institutionRes: $institutionRes');
-
       if (institutionRes.isEmpty) {
-        debugPrint('[StatusCheck] Institution not found — allowing login');
-        return null;
+        return {'role': role};
       }
 
       final status = institutionRes[0]['status']?.toString().toLowerCase().trim();
-      debugPrint('[StatusCheck] status: "$status"');
 
       if (status == 'suspended') {
-        return 'Your institution has been suspended. Contact support.';
+        return {'error': 'Your institution has been suspended. Contact support.'};
       }
       if (status == 'pending') {
-        return 'Your institution is pending approval.';
+        return {'error': 'Your institution is pending approval.'};
       }
 
-      debugPrint('[StatusCheck] Status is active — allowing login');
-      return null;
+      return {'role': role};
     } catch (e, stack) {
       debugPrint('[StatusCheck] Error: $e');
       debugPrint('[StatusCheck] Stack: $stack');
-      return null;
+      return {'role': 'admin'}; // fail open
     }
   }
 
@@ -147,7 +141,6 @@ class _LoginScreenState extends State<LoginScreen> {
         debugPrint('[login] log-login failed: ${response.statusCode}');
       }
     } catch (e) {
-      // Never block login on audit failure
       debugPrint('[login] log-login error: $e');
     }
   }
@@ -164,20 +157,16 @@ class _LoginScreenState extends State<LoginScreen> {
       final userId  = Supabase.instance.client.auth.currentUser?.id;
 
       if (userId != null) {
-        final error = await _checkInstitutionStatus(userId);
-        if (error != null) {
+        final result = await _checkInstitutionStatus(userId);
+        if (result.containsKey('error')) {
           await Supabase.instance.client.auth.signOut();
-          if (mounted) _showSnack(error, isError: true);
+          if (mounted) _showSnack(result['error'], isError: true);
           if (mounted) setState(() => _hasSession = false);
           return;
         }
+        if (session != null) await _logLoginEvent(session.accessToken);
+        if (mounted) await _navigateAfterLogin(result['role'] ?? 'admin');
       }
-
-      if (session != null) {
-        await _logLoginEvent(session.accessToken);
-      }
-
-      if (mounted) _navigateAfterLogin();
     } catch (e) {
       debugPrint('Biometric error: $e');
     }
@@ -199,19 +188,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
       final userId = res.user?.id;
       if (userId != null) {
-        final error = await _checkInstitutionStatus(userId);
-        if (error != null) {
+        final result = await _checkInstitutionStatus(userId);
+        if (result.containsKey('error')) {
           await Supabase.instance.client.auth.signOut();
-          if (mounted) _showSnack(error, isError: true);
+          if (mounted) _showSnack(result['error'], isError: true);
           return;
         }
+        if (res.session != null) _logLoginEvent(res.session!.accessToken);
+        if (mounted) await _navigateAfterLogin(result['role'] ?? 'admin');
       }
-
-      if (res.session != null) {
-        _logLoginEvent(res.session!.accessToken);
-      }
-
-      if (mounted) _navigateAfterLogin();
     } on AuthException catch (e) {
       if (mounted) _showSnack(e.message, isError: true);
     } catch (e) {
@@ -229,42 +214,50 @@ class _LoginScreenState extends State<LoginScreen> {
       final idToken = googleUser.authentication.idToken;
 
       if (idToken == null) {
-        debugPrint('[Google SignIn] idToken is null — check GOOGLE_WEB_CLIENT_ID');
         if (mounted) _showSnack('Google sign-in failed. Check configuration.', isError: true);
         return;
       }
 
+      // ── Preflight check ─────────────────────────────────────────────
+      final preflightRes = await http.post(
+        Uri.parse('https://faceattend.app/auth/google-preflight'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'id_token': idToken}),
+      );
+
+      final preflightData = jsonDecode(preflightRes.body);
+
+      if (preflightRes.statusCode != 200 || preflightData['allow'] != true) {
+        await GoogleSignIn.instance.signOut();
+        if (mounted) _showSnack(
+          preflightData['reason'] ?? 'Access denied. Contact your institution admin.',
+          isError: true,
+        );
+        return;
+      }
+
+      // ── Proceed with Supabase auth ───────────────────────────────────
       final res = await Supabase.instance.client.auth.signInWithIdToken(
-        provider:    OAuthProvider.google,
-        idToken:     idToken,
+        provider: OAuthProvider.google,
+        idToken:  idToken,
       );
 
       final userId = res.user?.id;
       if (userId != null) {
-        final error = await _checkInstitutionStatus(userId);
-        if (error != null) {
+        final result = await _checkInstitutionStatus(userId);
+        if (result.containsKey('error')) {
           await Supabase.instance.client.auth.signOut();
           await GoogleSignIn.instance.signOut();
-          if (mounted) _showSnack(error, isError: true);
+          if (mounted) _showSnack(result['error'], isError: true);
           return;
         }
+        if (res.session != null) _logLoginEvent(res.session!.accessToken);
+        if (mounted) await _navigateAfterLogin(result['role'] ?? 'admin');
       }
-
-      if (res.session != null) {
-        _logLoginEvent(res.session!.accessToken);
-      }
-
-      if (mounted) _navigateAfterLogin();
-
     } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) {
-        debugPrint('[Google SignIn] cancelled by user');
-        return;
-      }
-      debugPrint('[Google SignIn] GoogleSignInException: ${e.code}');
+      if (e.code == GoogleSignInExceptionCode.canceled) return;
       if (mounted) _showSnack('Google sign-in failed. Try again.', isError: true);
     } on AuthException catch (e) {
-      debugPrint('[Google SignIn] AuthException: ${e.message}');
       if (mounted) _showSnack(e.message, isError: true);
     } catch (e) {
       debugPrint('[Google SignIn] error: $e');
@@ -274,7 +267,8 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _navigateAfterLogin() {
+  // ── Role-based navigation ─────────────────────────────────────────────
+  Future<void> _navigateAfterLogin(String role) async {
     if (!mounted) return;
     Navigator.of(context).pushReplacementNamed('/home');
   }
@@ -321,24 +315,38 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 48),
 
                     // Icon + Title
-                    const Icon(Icons.face_retouching_natural,
-                        size: 72, color: Colors.cyanAccent),
-                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.cyanAccent.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.cyanAccent.withOpacity(0.3),
+                            blurRadius: 20,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.face_retouching_natural,
+                          size: 72, color: Colors.cyanAccent),
+                    ),
+                    const SizedBox(height: 24),
                     Text(
-                      _hasSession ? "Welcome Back" : "Face Attend",
+                      _hasSession ? "Welcome Back" : "FaceAttend",
                       style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 26,
+                          fontSize: 30,
                           fontWeight: FontWeight.bold,
                           letterSpacing: -0.5),
                     ),
-                    const SizedBox(height: 6),
-                    const Text("Sign in to continue",
-                        style: TextStyle(color: Colors.grey, fontSize: 14)),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 8),
+                    Text("Sign in to continue",
+                        style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+                    const SizedBox(height: 48),
 
                     // Email
                     TextField(
@@ -392,62 +400,70 @@ class _LoginScreenState extends State<LoginScreen> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.cyanAccent,
                               foregroundColor: Colors.black,
-                              minimumSize: const Size(double.infinity, 52),
+                              minimumSize: const Size(double.infinity, 54),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
+                                  borderRadius: BorderRadius.circular(12)),
+                              elevation: 8,
+                              shadowColor: Colors.cyanAccent.withOpacity(0.5),
                             ),
                             onPressed: _login,
                             child: const Text("LOGIN",
                                 style: TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    letterSpacing: 1)),
+                                    fontSize: 15,
+                                    letterSpacing: 1.2)),
                           ),
 
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
 
                     // Google Sign-In button
                     if (!_isLoading)
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.grey),
-                          minimumSize: const Size(double.infinity, 52),
+                          side: BorderSide(color: Colors.grey[700]!, width: 1.5),
+                          minimumSize: const Size(double.infinity, 54),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                              borderRadius: BorderRadius.circular(12)),
+                          backgroundColor: Colors.grey[900],
                         ),
                         onPressed: _signInWithGoogle,
                         icon: const Icon(Icons.g_mobiledata,
                             size: 26, color: Colors.white),
-                        label: const Text("CONTINUE WITH GOOGLE"),
+                        label: const Text("CONTINUE WITH GOOGLE",
+                            style: TextStyle(fontSize: 14, letterSpacing: 0.5)),
                       ),
 
                     // Biometric
                     if (_hasSession && !_isLoading) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.cyanAccent,
-                          side: const BorderSide(color: Colors.cyanAccent),
-                          minimumSize: const Size(double.infinity, 52),
+                          side: const BorderSide(color: Colors.cyanAccent, width: 1.5),
+                          minimumSize: const Size(double.infinity, 54),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                              borderRadius: BorderRadius.circular(12)),
+                          backgroundColor: Colors.cyanAccent.withOpacity(0.05),
                         ),
                         onPressed: _authenticate,
-                        icon: const Icon(Icons.fingerprint),
-                        label: const Text("USE FINGERPRINT"),
+                        icon: const Icon(Icons.fingerprint, size: 22),
+                        label: const Text("USE FINGERPRINT",
+                            style: TextStyle(fontSize: 14, letterSpacing: 0.5)),
                       ),
                     ],
 
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 32),
 
                     // Register university
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.cyanAccent,
-                        side: const BorderSide(color: Colors.grey),
-                        minimumSize: const Size(double.infinity, 52),
+                        side: BorderSide(color: Colors.grey[800]!, width: 1.5),
+                        minimumSize: const Size(double.infinity, 54),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
+                            borderRadius: BorderRadius.circular(12)),
+                        backgroundColor: Colors.grey[900]?.withOpacity(0.3),
                       ),
                       onPressed: () => Navigator.push(
                         context,
@@ -456,7 +472,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       icon: const Icon(Icons.school_outlined, size: 20),
-                      label: const Text("REGISTER YOUR UNIVERSITY"),
+                      label: const Text("REGISTER YOUR UNIVERSITY",
+                          style: TextStyle(fontSize: 13, letterSpacing: 0.5)),
                     ),
                     const SizedBox(height: 32),
                   ],

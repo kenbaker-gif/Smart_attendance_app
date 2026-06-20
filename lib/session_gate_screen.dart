@@ -27,16 +27,64 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
   List<Map<String, dynamic>> _lecturers = [];
   bool _loadingLecturers = false;
   bool _creatingSession = false;
+  bool _checkingSession = false;
   String? _coordinatorId;
 
   @override
   void initState() {
     super.initState();
     _loadCoordinatorId();
+    _checkExistingSession();
     // Auto-select if only one course unit
     if (widget.courseUnits.length == 1) {
       _selectedCourseUnit = widget.courseUnits.first;
       _loadLecturers(widget.courseUnits.first['id']);
+    }
+  }
+
+  // ── Check for existing active session ──────────────────────────────────
+  Future<void> _checkExistingSession() async {
+    setState(() => _checkingSession = true);
+    try {
+      final result = await Supabase.instance.client
+          .from('sessions')
+          .select('id, lecturer_id, course_unit_id')
+          .eq('institution_id', widget.institutionId)
+          .eq('status', 'active')
+          .order('started_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted) return;
+      if (result == null) return;
+
+      // Fetch lecturer name from profiles
+      final lecturerProfile = await Supabase.instance.client
+          .from('profiles')
+          .select('full_name')
+          .eq('id', result['lecturer_id'])
+          .single();
+
+      if (!mounted) return;
+
+      // Navigate to VerificationScreen with existing session
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VerificationScreen(
+            cameras: widget.cameras,
+            institutionId: widget.institutionId,
+            sessionId: result['id'].toString(),
+            lecturerName: lecturerProfile['full_name'] ?? 'Unknown',
+            lecturerId: result['lecturer_id'],
+            courseUnitId: result['course_unit_id'],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('_checkExistingSession error: $e');
+      // Continue normally if check fails
+    } finally {
+      if (mounted) setState(() => _checkingSession = false);
     }
   }
 
@@ -152,15 +200,15 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
       if (!mounted) return;
 
       // Navigate to verification screen with session context
-      Navigator.of(context).pushReplacement(
+      Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => VerificationScreen(
             cameras: widget.cameras,
             institutionId: widget.institutionId,
-            courseUnits: [_selectedCourseUnit!],
             sessionId: sessionId,
             lecturerName: _selectedLecturer!['full_name'],
             lecturerId: _selectedLecturer!['id'],
+            courseUnitId: _selectedCourseUnit!['id'],
           ),
         ),
       );
@@ -189,6 +237,16 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
   // ── Build ──────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // Show loading indicator while checking for existing session
+    if (_checkingSession) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.cyanAccent),
+        ),
+      );
+    }
+
     final bool canBegin =
         _selectedCourseUnit != null && _selectedLecturer != null;
 
@@ -201,47 +259,54 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Header ─────────────────────────────────────────────────
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.cyanAccent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+                          color: Colors.cyanAccent.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.cyanAccent.withOpacity(0.4), width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.cyanAccent.withOpacity(0.2),
+                              blurRadius: 12,
+                              spreadRadius: 1,
+                            ),
+                          ],
                         ),
                         child: const Icon(Icons.play_circle_outline,
-                            color: Colors.cyanAccent, size: 24),
+                            color: Colors.cyanAccent, size: 28),
                       ),
-                      const SizedBox(width: 14),
-                      const Column(
+                      const SizedBox(width: 16),
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('New Session',
+                          const Text('New Session',
                               style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 22,
+                                  fontSize: 28,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 0.5)),
                           Text('Set up before taking attendance',
-                              style: TextStyle(color: Colors.white38, fontSize: 12)),
+                              style: TextStyle(color: Colors.grey[400], fontSize: 13)),
                         ],
                       ),
                     ],
                   ),
                   IconButton(
-                    icon: const Icon(Icons.logout, color: Colors.white38),
+                    icon: Icon(Icons.logout, color: Colors.grey[400]),
                     tooltip: 'Sign out',
                     onPressed: _logout,
                   ),
                 ],
               ),
 
-              const SizedBox(height: 40),
+              const SizedBox(height: 48),
 
               // ── Step 1: Course Unit ────────────────────────────────────
               _StepLabel(number: '1', label: 'Select Course Unit'),
@@ -304,43 +369,51 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
               // ── Session summary ────────────────────────────────────────
               if (canBegin) ...[
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.cyanAccent.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.cyanAccent.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                        color: Colors.cyanAccent.withOpacity(0.2)),
+                        color: Colors.cyanAccent.withOpacity(0.3), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.cyanAccent.withOpacity(0.1),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ],
                   ),
                   child: Row(
                     children: [
                       const Icon(Icons.info_outline,
-                          color: Colors.cyanAccent, size: 16),
-                      const SizedBox(width: 10),
+                          color: Colors.cyanAccent, size: 18),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           '${_selectedCourseUnit!['name']}  ·  ${_selectedLecturer!['full_name']}',
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13),
+                          style: TextStyle(
+                              color: Colors.grey[300], fontSize: 14, fontWeight: FontWeight.w500),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
               ],
 
               // ── Begin button ───────────────────────────────────────────
               SizedBox(
                 width: double.infinity,
-                height: 54,
+                height: 56,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor:
                         canBegin ? Colors.cyanAccent : Colors.grey[800],
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    elevation: canBegin ? 4 : 0,
+                        borderRadius: BorderRadius.circular(14)),
+                    elevation: canBegin ? 8 : 0,
+                    shadowColor: canBegin ? Colors.cyanAccent.withOpacity(0.5) : null,
                   ),
                   onPressed: canBegin && !_creatingSession
                       ? _beginSession
@@ -355,16 +428,16 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
                       : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.play_arrow_rounded, size: 22),
-                            const SizedBox(width: 8),
+                            const Icon(Icons.play_arrow_rounded, size: 24),
+                            const SizedBox(width: 10),
                             Text(
                               canBegin
                                   ? 'BEGIN SESSION'
                                   : 'SELECT UNIT & LECTURER',
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                letterSpacing: 1,
+                                fontSize: 15,
+                                letterSpacing: 1.2,
                               ),
                             ),
                           ],
@@ -455,26 +528,33 @@ class _SelectionTile extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         decoration: BoxDecoration(
           color: isSelected
-              ? Colors.cyanAccent.withOpacity(0.1)
+              ? Colors.cyanAccent.withOpacity(0.12)
               : Colors.grey[900],
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isSelected ? Colors.cyanAccent : Colors.grey[800]!,
-            width: isSelected ? 1.5 : 1,
+            width: isSelected ? 2 : 1,
           ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: Colors.cyanAccent.withOpacity(0.2),
+              blurRadius: 8,
+              spreadRadius: 1,
+            ),
+          ] : null,
         ),
         child: Row(
           children: [
             Icon(
               icon,
-              color: isSelected ? Colors.cyanAccent : Colors.grey,
-              size: 20,
+              color: isSelected ? Colors.cyanAccent : Colors.grey[500],
+              size: 22,
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -482,19 +562,19 @@ class _SelectionTile extends StatelessWidget {
                   Text(
                     title,
                     style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.white70,
+                      color: isSelected ? Colors.white : Colors.grey[300],
                       fontWeight: isSelected
                           ? FontWeight.bold
-                          : FontWeight.normal,
-                      fontSize: 14,
+                          : FontWeight.w500,
+                      fontSize: 15,
                     ),
                   ),
                   if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 12),
+                      style: TextStyle(
+                          color: Colors.grey[500], fontSize: 12),
                     ),
                   ],
                 ],
@@ -502,7 +582,7 @@ class _SelectionTile extends StatelessWidget {
             ),
             if (isSelected)
               const Icon(Icons.check_circle,
-                  color: Colors.cyanAccent, size: 18),
+                  color: Colors.cyanAccent, size: 20),
           ],
         ),
       ),
