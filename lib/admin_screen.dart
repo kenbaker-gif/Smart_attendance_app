@@ -8,11 +8,12 @@ import 'package:http/http.dart' as http;
 import 'config.dart';
 
 // ── 4 capture steps ────────────────────────────────────────────────────────
+// ── 4 face verification steps ────────────────────────────────────────────────
 const List<Map<String, dynamic>> _captureSteps = [
-  {"label": "FRONT",      "instruction": "Look straight at the camera",          "icon": Icons.face},
-  {"label": "LEFT SIDE",  "instruction": "Turn your head slightly to the left",  "icon": Icons.arrow_back},
-  {"label": "RIGHT SIDE", "instruction": "Turn your head slightly to the right", "icon": Icons.arrow_forward},
-  {"label": "LOOK UP",    "instruction": "Tilt your head slightly upward",        "icon": Icons.arrow_upward},
+  {"label": "CAPTURE 1", "instruction": "Look straight at the camera", "icon": Icons.face},
+  {"label": "CAPTURE 2", "instruction": "Keep still, capturing again",  "icon": Icons.face_retouching_natural},
+  {"label": "CAPTURE 3", "instruction": "Hold steady, almost done",     "icon": Icons.face_retouching_natural},
+  {"label": "CAPTURE 4", "instruction": "Final capture, stay still",    "icon": Icons.face},
 ];
 
 class AdminScreen extends StatefulWidget {
